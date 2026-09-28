@@ -451,6 +451,35 @@ fn control_flow_demo() {
 
 ---
 
+### 1.8 Mini Project Fase 1: Calculator CLI
+
+Selaras dengan implementasi praktikum di [`rust-learning-lab/src/mini_project_1.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/mini_project_1.rs):
+
+Mini project kalkulator CLI memadukan konsep **Functions**, **Expressions vs Statements**, **Enum Result Error Handling**, dan **Control Flow (`match`)**.
+
+#### 1. Arsitektur & Modularitas Fungsi
+```rust
+pub fn add(a: f64, b: f64) -> f64 { a + b }
+pub fn subtract(a: f64, b: f64) -> f64 { a - b }
+pub fn multiply(a: f64, b: f64) -> f64 { a * b }
+
+pub fn divide(a: f64, b: f64) -> Result<f64, String> {
+    if b == 0.0 {
+        Err(String::from("Pembagian dengan nol tidak valid"))
+    } else {
+        Ok(a / b)
+    }
+}
+```
+
+#### 2. Rangkuman Kelulusan Fase 1
+| Konsep Inti | Ringkasan Teknis |
+|---|---|
+| **Expression vs Statement** | Expression dievaluasi menghasilkan nilai (contoh: `a + b`, blok `match`). Statement adalah aksi/deklarasi tanpa nilai return (menghasilkan unit `()`). Titik koma (`;`) mengubah expression menjadi statement. |
+| **Immutable vs Mutable vs Shadowing** | Immutable (`let x`): proteksi nilai default. Mutable (`let mut x`): alokasi memori sama, isi dapat diubah in-place, tipe terkunci. Shadowing (`let x; let x;`): binding variabel baru timpa nama lama, tipe data dan mutability boleh berubah. |
+
+---
+
 ## FASE 2: Ownership, Borrowing, Slices, & UTF-8 Memory Internals
 
 ### 2.1 Model Memori: 3 Aturan Emas Ownership & RAII
@@ -1037,47 +1066,399 @@ match text.get(0..6) {
 
 ---
 
+### 2.6 Mini Project Fase 2: Text Analyzer
+
+Selaras dengan implementasi praktikum di [`rust-learning-lab/src/mini_project_2.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/mini_project_2.rs):
+
+Mini project ini memadukan konsep **Borrowing (`&str`)**, **Slice**, dan **Karakteristik Memori UTF-8** untuk menganalisis statistik teks tanpa menyalin alokasi memori heap (*zero-cost abstraction*).
+
+#### 1. Arsitektur & Signature Fungsi
+Fungsi-fungsi analyzer tidak mengambil kepemilikan (*ownership*) dari teks pemanggil, melainkan hanya meminjam melalui string slice (`&str`):
+
+```rust
+// 1. Menghitung jumlah raw byte di memori UTF-8 (O(1))
+pub fn count_bytes(s: &str) -> usize {
+    s.len()
+}
+
+// 2. Menghitung jumlah karakter Unicode Scalar Values (O(n))
+pub fn count_characters(s: &str) -> usize {
+    s.chars().count()
+}
+
+// 3. Menghitung jumlah kata berdasarkan pemisah whitespace
+pub fn count_words(s: &str) -> usize {
+    s.split_whitespace().count()
+}
+
+// 4. Agregasi statistik teks dalam bentuk Tuple
+pub fn analyze_text(s: &str) -> (usize, usize, usize) {
+    (count_bytes(s), count_characters(s), count_words(s))
+}
+```
+
+#### 2. Perilaku Eksekusi & Bukti UTF-8
+Contoh ketika teks `"Rust 🦀"` dianalisis:
+```text
+=== Mini Project Fase 2: Text Analyzer ===
+Masukkan teks: Rust 🦀
+Bytes       : 9
+Characters  : 6
+Words       : 2
+```
+- **Bytes (9)**: `'R'`(1) + `'u'`(1) + `'s'`(1) + `'t'`(1) + `' '`(1) + `'🦀'`(4 byte) = 9 byte.
+- **Characters (6)**: 5 karakter ASCII + 1 karakter Emoji.
+- **Words (2)**: Terdiri dari token `"Rust"` dan `"🦀"`.
+
+---
+
+#### 3. Deep Dive: Mengapa Argumen `"Masukkan teks: "` adalah Reference Tanpa Simbol `&`?
+
+Perhatikan pemanggilan fungsi di [`mini_project_2.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/mini_project_2.rs#L50):
+```rust
+let input = read_line_or_default("Masukkan teks: ", "Belajar Rust 🦀 sangat menyenangkan!");
+```
+
+Sedangkan signature fungsinya:
+```rust
+fn read_line_or_default(prompt: &str, default: &str) -> String
+```
+
+**Pertanyaan Kritis Pemula:** *“Kenapa `"Masukkan teks: "` cocok dengan parameter `&str`, padahal di depannya tidak ditulis tanda `&`?”*
+
+**Jawaban & Cara Kerja Memori:**
+Di Rust, semua teks yang ditulis di dalam tanda kutip ganda `"..."` disebut **String Literal**:
+1. **Otomatis `&'static str`**: Compiler Rust secara implisit menetapkan tipe data untuk setiap string literal sebagai `&'static str`.
+2. **Tersimpan di Segmen Binary (Read-Only Data)**: Teks literal dikompilasi langsung ke memori program biner, bukan dialokasikan di Heap saat runtime.
+3. **Reference Bawaan**: Karena string literal sejatinya adalah fat pointer (alamat di biner + panjang byte), maka `"Masukkan teks: "` secara otomatis sudah merupakan reference (`&str`). Menulis `&"Masukkan teks: "` bersifat redundan.
+
+**Korelasi Ownership pada `input`:**
+- Fungsi `read_line_or_default` mengembalikan tipe **`String`** (tanpa tanda `&`).
+- Maka variabel `let input` bertindak sebagai **OWNER** sah atas alokasi buffer baru di memori Heap.
+- Saat memanggil `analyze_text(&input)`, simbol `&` wajib ditulis agar data hanya dipinjam (*borrow*), bukan dipindahkan (*move*), di mana compiler melakukan **Deref Coercion** otomatis dari `&String` menjadi `&str`.
+
+---
+
+#### 4. Rangkuman Kelulusan Fase 2
+
+| Konsep Inti | Ringkasan Teknis |
+|---|---|
+| **Move vs Copy vs Clone** | **Move**: Mengalihkan kepemilikan pointer heap ke owner baru, owner lama di-*invalidate* ($O(1)$).<br>**Copy**: Duplikasi bit Stack otomatis untuk tipe primitif bertrait `Copy`.<br>**Clone**: Deep copy seluruh alokasi data Heap ($O(n)$) secara eksplisit. |
+| **`String` vs `&str`** | **`String`**: Tipe owned dinamis di Heap, mutable, memiliki `ptr`, `len`, `capacity`.<br>**`&str`**: Tipe borrowed slice (fat pointer: `ptr` + `len`), read-only window ke data string (literal binary, heap `String`, dll). |
+| **Kenapa Indexing String Dilarang (`text[i]`)** | UTF-8 menggunakan panjang variabel 1–4 byte per karakter. Akses index langsung berisiko jatuh di tengah-tengah sequence byte karakter multi-byte (*boundary violation*), merusak invariant validitas UTF-8. Mencegah bug ini secara aman membutuhkan scan $O(n)$ via `.chars().nth(i)`. |
+| **Non-Lexical Lifetimes (NLL)** | Borrow checker Rust mengakhiri masa hidup (*lifetime*) sebuah reference pada titik terakhir referensi tersebut digunakan dalam kode (*last use*), bukan menunggu sampai akhir kurung kurawal scope (`}`). Ini memungkinkan mutable borrow baru dibuat tepat setelah shared borrow selesai dibaca. |
+
+---
+
 ## FASE 3: Rust Type System (Structs, Enums, & Advanced Pattern Matching)
 
 ### 3.1 Structs: Classic, Tuple, Unit, & Methods
+
+Struct adalah tipe data bentukan kustom (*custom data type*) yang mengelompokkan beberapa nilai terkait ke dalam satu kesatuan bermakna.
+
+Berbeda dari bahasa pemrograman berorientasi objek tradisional (OOP) seperti Java atau C++:
+- **Rust memisahkan Data dan Perilaku (*Behavior*)**: Data didefinisikan murni di dalam `struct`, sedangkan perilaku / fungsinya didefinisikan terpisah di dalam blok `impl` (*implementation*).
+- Tidak ada pewarisan kelas (*class inheritance*). Rust menggunakan komposisi dan *traits*.
+
+---
+
+#### 1. Tiga Ragam Struct di Rust
+
+Rust menyediakan 3 jenis struct sesuai kebutuhan perancangan domain:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        RAGAM STRUCT DI RUST                            │
+├─────────────────────┬──────────────────────────┬───────────────────────┤
+│   Classic Struct    │       Tuple Struct       │   Unit-like Struct    │
+│   (Named Fields)    │     (Indexed Fields)     │    (Zero-Sized ZST)   │
+├─────────────────────┼──────────────────────────┼───────────────────────┤
+│ struct UserAccount  │ struct ColorRgb          │ struct AdminPrivilege;│
+│ { id: u64, ... }    │ (u8, u8, u8);            │                       │
+│ Akses: acc.id       │ Akses: color.0           │ Akses: Tanpa field    │
+│ Domain Model Utama  │ Koordinat / Newtype Type │ Marker / Type-State   │
+└─────────────────────┴──────────────────────────┴───────────────────────┘
+```
+
+1. **Classic Struct (Named Fields)**:
+   - Setiap field memiliki nama dan tipe data yang eksplisit.
+   - Ideal untuk memodelkan entitas bisnis/domain (contoh: `UserAccount`, `Order`, `Product`).
+   - Mendukung **Field Init Shorthand** (jika nama variabel sama dengan nama field: `id` alih-alih `id: id`).
+   - Mendukung **Struct Update Syntax** (`..base_account`) untuk membuat instansiasi baru dengan menyalin nilai field yang tersisa.
+
+2. **Tuple Struct (Indexed Fields & Newtype Pattern)**:
+   - Field tidak diberi nama, melainkan diakses melalui indeks angka numerik: `.0`, `.1`, `.2`.
+   - Sangat ampuh untuk **Newtype Pattern** (membungkus tipe primitif agar *type-safe*, misal `Kilometers(f64)` vs `Miles(f64)` sehingga tidak sengaja tertukar saat kalkulasi).
+
+3. **Unit-like Struct (Zero-Sized Type / ZST)**:
+   - Struct tanpa field sama sekali (`struct AdminPrivilege;`).
+   - Memiliki ukuran **0 byte** di memori (`std::mem::size_of::<T>() == 0`).
+   - Digunakan sebagai *marker trait*, kontrol hak akses pada *type-state pattern*, atau mendefinisikan behavior statis tanpa beban memori.
+
+---
+
+#### 2. Blok `impl`: Mengapa Rust Butuh `self` Eksplisit?
+
+Di bahasa pemrograman berorientasi objek lain (seperti Java, C++, atau JavaScript), terdapat kata kunci gaib `this` yang secara otomatis diselipkan compiler di balik layar ke dalam method.
+
+Rust memilih prinsip **Explict over Implicit** (eksplisit lebih baik daripada gaib). Method di Rust sebenarnya adalah **fungsi biasa**:
+- Yang membedakan "fungsi biasa" dengan "method" hanyalah **parameter pertamanya**: jika parameter pertamanya bernama `self`, maka Rust mengizinkan fungsi tersebut dipanggil menggunakan notasi titik (*dot syntax*): `account.deposit(50.0)`.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        ANATOMI BLOK IMPL                               │
+├───────────────────────────────────┬────────────────────────────────────┤
+│        Associated Function        │               Method               │
+│           (Tanpa self)            │        (Ada parameter self)        │
+├───────────────────────────────────┼────────────────────────────────────┤
+│ fn new(...) -> Self               │ fn is_solvent(&self) -> bool       │
+│ fn from_db(...) -> Self           │ fn deposit(&mut self, amount: f64) │
+│                                   │ fn close_account(self) -> String   │
+│ Dipanggil via Nama Tipe:          │ Dipanggil via Instance Objek:      │
+│ UserAccount::new(...)             │ account.deposit(...)               │
+└───────────────────────────────────┴────────────────────────────────────┘
+```
+
+> [!NOTE]
+> **Di Balik Layar (Desugaring Notasi Titik):**  
+> Saat menulis:
+> ```rust
+> account.deposit(100.0);
+> ```
+> Rust compiler secara internal mengubahnya (*desugar*) menjadi pemanggilan fungsi biasa:
+> ```rust
+> UserAccount::deposit(&mut account, 100.0);
+> ```
+> Notasi titik hanyalah gula sintaksis (*syntactic sugar*) agar kode lebih mudah dan nyaman dibaca!
+
+---
+
+#### 3. Perbedaan Kritis: `Self` (Kapital) vs `self` (Kecil)
+
+Ini perbedaan mendasar yang paling sering membingungkan pemula:
+
+| Simbol | Apa itu? | Analogi | Contoh di Kode |
+|---|---|---|---|
+| **`Self`** (S Kapital) | **Tipe Data** (Type Alias untuk struct yang di-impl) | **Cetak Biru / Resep Kue** | `pub fn new(...) -> Self` |
+| **`self`** (s kecil) | **Nilai / Instance Objek** yang sedang menjalankan fungsi | **Kue Nyata Hasil Cetakan** | `pub fn deposit(&mut self, ...)` |
+
+Di dalam blok `impl UserAccount`:
+- Menulis return type `-> Self` sama persis artinya dengan menulis `-> UserAccount`.
+- Menulis konstruktor `Self { ... }` sama persis artinya dengan menulis `UserAccount { ... }`.
+- Keuntungannya: Jika suatu saat nama struct diganti dari `UserAccount` menjadi `Account`, seluruh isi blok `impl` yang menggunakan `Self` tidak perlu diubah satu per satu!
+
+---
+
+#### 4. Empat Variasi Pemanggilan `self` & Hubungannya dengan Ownership
+
+Karena Rust mengelola memori melalui sistem **Ownership & Borrowing**, perlakuan terhadap `self` terbagi menjadi 4 variasi sesuai hak akses yang dibutuhkan:
+
+##### A. Tanpa `self` (Associated Function / Constructor)
+- **Definisi**: Fungsi di dalam `impl` yang tidak mencantumkan `self` pada parameternya.
+- **Karakteristik**: Fungsi ini milik Tipe-nya secara umum, bukan milik objek tertentu (mirip *static method* di Java/C#).
+- **Tujuan Utama**: Konstruktor (*factory pattern*) untuk membuat instance baru dari nol.
+- **Pemanggilan**: Menggunakan operator `::` langsung dari nama tipe:
+  ```rust
+  let acc = UserAccount::new(1, "boyblanco", "boy@example.com");
+  ```
+
+##### B. `&self` (Immutable Borrow — "Hanya Numpang Baca")
+- **Bentuk Asli (Desugared)**: `self: &Self`.
+- **Karakteristik**: Meminjam instance hanya untuk keperluan baca (*read-only*).
+- **Ownership**: Objek **tidak berpindah (no move)**. Setelah method selesai, objek asli tetap utuh dan masih dapat digunakan di baris berikutnya.
+- **Analogi**: Membaca buku di perpustakaan. Kamu membaca isi lembarannya, tetapi tidak mencoret-coret atau membawa pulang buku tersebut.
+- **Contoh**: Getter, kalkulasi saldo, format tampilan:
+  ```rust
+  pub fn is_solvent(&self) -> bool {
+      self.balance >= 0.0 // Hanya membaca nilai self.balance
+  }
+  ```
+
+##### C. `&mut self` (Mutable Borrow — "Pinjam dan Boleh Ubah")
+- **Bentuk Asli (Desugared)**: `self: &mut Self`.
+- **Karakteristik**: Meminjam instance dengan hak modifikasi nilai internal (*read-write*).
+- **Syarat Mutlak**: Variabel instance pemanggil **wajib dideklarasikan dengan kata kunci `mut`** (`let mut acc = ...;`).
+- **Ownership**: Objek **tidak berpindah**, tetapi nilainya dimutasi langsung di lokasi memori yang sama (*in-place mutation*).
+- **Analogi**: Menyerahkan formulir biodata ke loket untuk diperbarui nomor teleponnya, lalu formulir dikembalikan lagi ke tanganmu.
+- **Contoh**: Menambah saldo (*deposit*), menarik uang (*withdraw*), mematikan akun (*deactivate*):
+  ```rust
+  pub fn deposit(&mut self, amount: f64) -> Result<f64, String> {
+      self.balance += amount; // Mengubah field internal
+      Ok(self.balance)
+  }
+  ```
+
+##### D. `self` (By Value / Move — "Makan / Ambil Alih Hak Milik")
+- **Bentuk Asli (Desugared)**: `self: Self`.
+- **Karakteristik**: Mengambil alih kepemilikan penuh (*ownership*) dari objek pemanggil ke dalam method.
+- **Konsekuensi Kritis**: Begitu method ini selesai dijalankan, instance `self` **langsung di-drop dan dihancurkan dari RAM**. Variabel aslinya di sisi pemanggil menjadi **invalid / hangus** (*moved*).
+- **Analogi**: Memakan kue atau membakar surat rahasia. Begitu proses selesai, kue atau suratnya sudah musnah dan tidak bisa dipakai lagi.
+- **Kapan Digunakan?**:
+  1. **Konversi / Transformasi Tipe**: Misal mengubah struct menjadi data mentah (`into_bytes()`, `into_inner()`).
+  2. **Penutupan / Destruksi Permanen**: Menutup rekening atau memutus koneksi socket sehingga tidak mungkin dipakai lagi secara tidak sengaja.
+  3. **State Machine Transitions**: Mengubah status `DraftPost` menjadi `PublishedPost` di mana versi draft tidak boleh eksis lagi.
+- **Contoh**:
+  ```rust
+  pub fn close_account(self) -> String {
+      format!("Akun #{} milik '{}' resmi ditutup dan dibersihkan dari memori.", self.id, self.username)
+  } // 'self' keluar dari scope dan di-drop seketika di sini!
+  ```
+
+---
+
+#### 5. Rangkuman Cheat Sheet `self`
+
+| Sintaks Singkat | Bentuk Asli (Desugared) | Hak Akses | Status Objek Setelah Method Selesai | Kebutuhan Variabel Pemanggil | Cara Panggil |
+|---|---|---|---|---|---|
+| *(tanpa self)* | *(tidak ada)* | Tidak pegang instance | Belum dibuat / Terpisah | Bebas | `UserAccount::new(...)` |
+| **`&self`** | `self: &Self` | Read-only (Baca saja) | **Tetap Utuh & Valid** | `let acc = ...;` | `acc.is_solvent()` |
+| **`&mut self`** | `self: &mut Self` | Read + Write (Ubah nilai) | **Tetap Utuh (Nilai Berubah)** | `let mut acc = ...;` | `acc.deposit(50.0)` |
+| **`self`** | `self: Self` | Move (Ambil Hak Milik) | **Musnah / Hangus (Di-drop)** | Bebas (akan dipindah) | `acc.close_account()` |
+
+---
+
+#### 6. Kode Lengkap & Selaras Lab (`fase3_task_1.rs`)
+
+Berikut implementasi lengkap yang mengintegrasikan seluruh ragam struct dan keempat variasi `self` di atas:
+
 ```rust
-// 1. Classic Struct
-#[derive(Debug, Clone)]
-pub struct Account {
+// ==========================================
+// 1. Classic Struct (Named Fields)
+// ==========================================
+#[derive(Debug, Clone, PartialEq)]
+pub struct UserAccount {
     pub id: u64,
     pub username: String,
+    pub email: String,
     pub active: bool,
     pub balance: f64,
 }
 
-// 2. Tuple Struct
+// ==========================================
+// 2. Tuple Struct & Newtype Pattern
+// ==========================================
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColorRgb(pub u8, pub u8, pub u8);
 
-// 3. Unit-like Struct (tanpa field, berguna untuk marker trait)
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Kilometers(pub f64);
+
+// ==========================================
+// 3. Unit-like Struct (Zero-Sized Type / ZST)
+// ==========================================
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AdminPrivilege;
 
-impl Account {
-    // Associated function (constructor)
-    pub fn new(id: u64, username: &str) -> Self {
+// ==========================================
+// 4. Implementasi `impl` untuk UserAccount
+// ==========================================
+impl UserAccount {
+    // A. Associated Function (Constructor) -> Mengembalikan `Self`
+    // Dipanggil via UserAccount::new(...)
+    pub fn new(id: u64, username: &str, email: &str) -> Self {
+        // Field init shorthand: id langsung terisi dari argumen id
         Self {
             id,
             username: username.to_string(),
+            email: email.to_string(),
             active: true,
             balance: 0.0,
         }
     }
 
-    // Method membaca (&self)
+    pub fn with_initial_balance(id: u64, username: &str, email: &str, initial_balance: f64) -> Self {
+        Self {
+            id,
+            username: username.to_string(),
+            email: email.to_string(),
+            active: true,
+            balance: initial_balance,
+        }
+    }
+
+    // B. Method membaca (&self) -> Meminjam data tanpa mutasi (Read-only)
     pub fn is_solvent(&self) -> bool {
         self.balance >= 0.0
     }
 
-    // Method mutasi (&mut self)
-    pub fn deposit(&mut self, amount: f64) {
+    pub fn display_summary(&self) -> String {
+        format!(
+            "[Account #{}] User: '{}' ({}) | Active: {} | Balance: ${:.2}",
+            self.id, self.username, self.email, self.active, self.balance
+        )
+    }
+
+    // C. Method mutasi (&mut self) -> Mengubah data internal (Read-write)
+    pub fn deposit(&mut self, amount: f64) -> Result<f64, String> {
+        if amount <= 0.0 {
+            return Err("Nominal deposit harus lebih besar dari 0".to_string());
+        }
         self.balance += amount;
+        Ok(self.balance)
+    }
+
+    pub fn withdraw(&mut self, amount: f64) -> Result<f64, String> {
+        if amount <= 0.0 {
+            return Err("Nominal penarikan harus lebih besar dari 0".to_string());
+        }
+        if self.balance < amount {
+            return Err(format!(
+                "Saldo tidak mencukupi: saldo saat ini ${:.2}, ditarik ${:.2}",
+                self.balance, amount
+            ));
+        }
+        self.balance -= amount;
+        Ok(self.balance)
+    }
+
+    pub fn deactivate(&mut self) {
+        self.active = false;
+    }
+
+    // D. Method consuming (self) -> Mengambil kepemilikan (Move)
+    // Setelah fungsi ini dipanggil, instance struct di-drop dari memori!
+    pub fn close_account(self) -> String {
+        format!(
+            "Akun #{} milik '{}' resmi ditutup dan dihapus dari memori.",
+            self.id, self.username
+        )
+    }
+}
+
+// ==========================================
+// 5. Implementasi Tuple & Unit Struct
+// ==========================================
+impl ColorRgb {
+    pub fn black() -> Self {
+        Self(0, 0, 0)
+    }
+
+    pub fn white() -> Self {
+        Self(255, 255, 255)
+    }
+
+    pub fn to_hex(&self) -> String {
+        format!("#{:02X}{:02X}{:02X}", self.0, self.1, self.2)
+    }
+}
+
+impl Kilometers {
+    pub fn to_miles(&self) -> f64 {
+        self.0 * 0.621371
+    }
+}
+
+impl AdminPrivilege {
+    pub fn can_delete_users(&self) -> bool {
+        true
     }
 }
 ```
+
+> [!TIP]
+> **Kapan Memilih Tuple Struct vs Classic Struct?**  
+> Gunakan Classic Struct saat field memiliki makna mandiri yang butuh kejelasan nama (contoh: `street`, `city`, `zip_code`).  
+> Gunakan Tuple Struct saat nama field sudah sangat jelas dari posisinya (contoh: koordinat `Point(x, y)`) atau untuk Newtype wrapper 1 elemen demi keamanan kompilasi (*type safety*).
 
 ---
 
