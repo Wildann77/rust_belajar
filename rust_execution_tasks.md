@@ -346,14 +346,14 @@ Menggunakan type system Rust untuk memodelkan domain.
 
 ## Task 1 — Struct
 
-- [ ] Classic struct.
-- [ ] Tuple struct.
-- [ ] Unit-like struct.
-- [ ] `impl`.
-- [ ] Associated function.
-- [ ] Method `&self`.
-- [ ] Method `&mut self`.
-- [ ] `Self`.
+- [x] Classic struct.
+- [x] Tuple struct.
+- [x] Unit-like struct.
+- [x] `impl`.
+- [x] Associated function.
+- [x] Method `&self`.
+- [x] Method `&mut self`.
+- [x] `Self`.
 
 ## Task 2 — Enum
 
