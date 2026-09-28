@@ -324,17 +324,17 @@ Words       : ...
 ```
 
 Tambahkan:
-- [ ] Function untuk menghitung byte.
-- [ ] Function untuk menghitung character.
-- [ ] Function untuk menghitung word.
-- [ ] Function menerima `&str`, bukan mengambil ownership jika tidak perlu.
+- [x] Function untuk menghitung byte.
+- [x] Function untuk menghitung character.
+- [x] Function untuk menghitung word.
+- [x] Function menerima `&str`, bukan mengambil ownership jika tidak perlu.
 
 ### Lulus fase
 
-- [ ] Bisa menjelaskan move vs copy vs clone.
-- [ ] Bisa menjelaskan `String` vs `&str`.
-- [ ] Bisa menjelaskan mengapa UTF-8 membuat indexing string tidak sederhana.
-- [ ] Bisa menjelaskan NLL dengan contoh sendiri.
+- [x] Bisa menjelaskan move vs copy vs clone.
+- [x] Bisa menjelaskan `String` vs `&str`.
+- [x] Bisa menjelaskan mengapa UTF-8 membuat indexing string tidak sederhana.
+- [x] Bisa menjelaskan NLL dengan contoh sendiri.
 
 ---
 

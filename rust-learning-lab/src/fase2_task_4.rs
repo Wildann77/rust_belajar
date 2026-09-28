@@ -12,7 +12,7 @@ pub fn first_word(s: &str) -> &str {
         }
     }
 
-    &s[..] // jika tidak ada spasi, seluruh string adalah kata pertama
+    s // jika tidak ada spasi, seluruh string adalah kata pertama
 }
 
 /// Menghitung jumlah seluruh elemen pada slice integer.

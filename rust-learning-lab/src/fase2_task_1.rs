@@ -40,6 +40,7 @@ pub fn run() {
     let flag_copy = is_rust_fast;
     println!("   Bool: is_rust_fast = {is_rust_fast}, flag_copy = {flag_copy}");
 
+    #[allow(clippy::approx_constant)]
     let tuple_copy: (i32, f64, char) = (100, 3.14, '🦀');
     let tuple_clone = tuple_copy; // Tuple primitif juga Copy
     println!("   Tuple Copy: tuple_copy = {:?}, tuple_clone = {:?}", tuple_copy, tuple_clone);

@@ -17,6 +17,7 @@ pub fn gives_ownership() -> String {
 
 /// Menggunakan borrow (&String) tanpa mengambil alih kepemilikan.
 /// Nilai hanya dibaca (read-only), pemanggil tetap menjadi owner sah.
+#[allow(clippy::ptr_arg)]
 pub fn calculate_length(s: &String) -> usize {
     s.len()
 }

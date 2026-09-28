@@ -8,4 +8,4 @@ Instruksi kerja:
 5. Tandai checklist task terkait menjadi `[x]` di `rust_execution_tasks.md`.
 6. Beri laporan ringkas: konsep inti materi, file yang dibuat/diubah, dan bukti hasil run.
 
-NOTE : PADA  rust_learning_guide.md ITU MASIH BELUM SESUAI DENGAN CODE HASIL TASK NYA JADI SESUAIKAN JUGA SEPERTI KODENYA AGAR SELARAS DAN LEBIH JELAS LAGI UNTUK PENJELASAN NYA 
+NOTE: PADA rust_learning_guide.md ITU MASIH BELUM SESUAI DENGAN CODE HASIL TASK NYA JADI SESUAIKAN JUGA SEPERTI KODENYA AGAR SELARAS DAN LEBIH JELAS LAGI UNTUK PENJELASAN NYA  pada md file agar mudah di pahami
