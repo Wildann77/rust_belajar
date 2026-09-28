@@ -1462,50 +1462,841 @@ impl AdminPrivilege {
 
 ---
 
-### 3.2 Advanced Pattern Matching
-Pattern matching di Rust bersifat *exhaustive* (wajib menangani semua kemungkinan cabang).
+### 3.2 Enums: Data Variants, Tagged Unions, & Memory Layout
+
+Enum (*Enumeration*) di Rust adalah tipe data aljabar (*Algebraic Data Type* / *Sum Type*) yang memungkinkan suatu nilai menjadi salah satu dari beberapa kemungkinan varian.
+
+Berbeda dari enum di bahasa C atau Java biasa yang sekadar konstanta bilangan bulat (*integer constants*), **Enum di Rust dapat membawa tipe data berbeda di setiap variannya**:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        RAGAM VARIANT ENUM RUST                         │
+├─────────────────────┬──────────────────────────┬───────────────────────┤
+│  Unit-like Variant  │    Tuple-like Variant    │  Struct-like Variant  │
+│     (Tanpa Data)    │      (Data Berurutan)    │     (Named Fields)    │
+├─────────────────────┼──────────────────────────┼───────────────────────┤
+│ Status::Todo        │ TaskEvent::              │ TaskEvent::           │
+│ TaskEvent::Created  │ AssignedTo(String)       │ CommentAdded {        │
+│                     │ StatusChanged(from, to)  │   author: String,     │
+│                     │ LoggedHours(f64)         │   content: String,    │
+│                     │                          │   is_internal: bool   │
+│                     │                          │ }                     │
+└─────────────────────┴──────────────────────────┴───────────────────────┘
+```
+
+---
+
+#### 1. Basic Enum (`Status`)
+
+Bentuk paling sederhana adalah enum tanpa payload data tambahan, cocok untuk memodelkan *state* atau status:
 
 ```rust
-#[derive(Debug)]
-pub enum WebEvent {
-    PageLoad,
-    KeyPress(char),
-    Paste(String),
-    Click { x: i64, y: i64 },
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    Todo,
+    InProgress,
+    Done,
+}
+```
+
+Seperti halnya `struct`, enum di Rust juga dapat memiliki blok `impl` untuk mendefinisikan method dan fungsi:
+
+```rust
+impl Status {
+    pub fn default_status() -> Self {
+        Self::Todo
+    }
+
+    // Method mencocokkan varian dengan exhaustive match
+    pub fn label(&self) -> &'static str {
+        match self {
+            Status::Todo => "Menunggu Dikerjakan (TODO)",
+            Status::InProgress => "Sedang Berjalan (IN PROGRESS)",
+            Status::Done => "Selesai (DONE)",
+        }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        matches!(self, Status::Done)
+    }
+
+    pub fn next(&self) -> Option<Status> {
+        match self {
+            Status::Todo => Some(Status::InProgress),
+            Status::InProgress => Some(Status::Done),
+            Status::Done => None,
+        }
+    }
+}
+```
+
+---
+
+#### 2. Enum Membawa Data (*Data-Bearing Variants*)
+
+Keunggulan utama Rust adalah kemampuan menyematkan data berbeda di setiap varian:
+
+1. **Unit-like Variant**: Tidak membawa data apapun (`TaskEvent::Created`).
+2. **Tuple-like Variant**: Membawa data tanpa nama field, diakses berdasarkan posisi urutan argumen (`TaskEvent::AssignedTo(String)`, `TaskEvent::StatusChanged(Status, Status)`).
+3. **Struct-like Variant**: Membawa data dengan nama field yang eksplisit diapit kurung kurawal `{ ... }` (`TaskEvent::CommentAdded { author, content, is_internal }`).
+
+---
+
+#### 3. Di Balik Layar: Memory Layout & *Tagged Union*
+
+Di tingkat biner memori (RAM), enum di Rust diimplementasikan sebagai **Tagged Union** (atau *Discriminated Union*):
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                  MEMORY LAYOUT ENUM DI RAM                   │
+├─────────────────────┬────────────────────────────────────────┤
+│ Tag / Discriminant  │        Payload Data (Union Area)       │
+│      (1-8 byte)     │  (Sebesar ukuran variant yang terbesar)│
+└─────────────────────┴────────────────────────────────────────┘
+```
+
+- **Tag / Discriminant**: Angka integer kecil (biasanya 1 byte: `0`, `1`, `2`, ...) yang memberi tahu compiler varian mana yang sedang aktif saat ini.
+- **Payload Data Area**: Karena satu instance hanya bisa berupa **satu varian pada satu waktu**, ukuran memorinya dialokasikan sebesar **varian terbesar** di antara seluruh opsi.
+
+```rust
+// Contoh ukuran memori:
+let status_size = std::mem::size_of::<Status>();       // 1 byte (cukup tag 0, 1, 2)
+let event_size  = std::mem::size_of::<TaskEvent>();    // 56 bytes (tag + string/fields terbesar)
+```
+
+> [!IMPORTANT]
+> **Optimasi Compiler: Null Pointer Optimization (NPO)**  
+> Jika sebuah enum seperti `Option<&T>` atau `Option<Box<T>>` membungkus sebuah pointer yang dijamin tidak pernah bernilai nol (*non-null pointer*), Rust memanfaatkan nilai alamat bit `0x0` sebagai penanda varian `None`.  
+> Hasilnya: `std::mem::size_of::<Option<&T>>() == std::mem::size_of::<&T>()` (**0 overhead memori tambahan!**).
+
+---
+
+#### 4. Kode Lengkap & Selaras Lab (`fase3_task_2.rs`)
+
+Berikut implementasi lengkap dari laboratorium:
+
+```rust
+// ==========================================
+// 1. Basic Enum: Status
+// ==========================================
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    Todo,
+    InProgress,
+    Done,
 }
 
-fn process_event(event: WebEvent) {
-    match event {
-        WebEvent::PageLoad => println!("Halaman dimuat"),
-        
-        // Pattern dengan Match Guard (if condition)
-        WebEvent::KeyPress(c) if c.is_ascii_digit() => {
-            println!("Tombol angka ditekan: {}", c);
-        }
-        WebEvent::KeyPress(c) => println!("Tombol karakter: {}", c),
+impl Status {
+    pub fn default_status() -> Self {
+        Self::Todo
+    }
 
-        WebEvent::Paste(ref text) => println!("Paste: {}", text),
-
-        // Destructuring Struct-like variant dengan binding @ dan range
-        WebEvent::Click { x: x @ 0..=100, y } => {
-            println!("Klik di area pojok kiri: x={}, y={}", x, y);
+    pub fn label(&self) -> &'static str {
+        match self {
+            Status::Todo => "Menunggu Dikerjakan (TODO)",
+            Status::InProgress => "Sedang Berjalan (IN PROGRESS)",
+            Status::Done => "Selesai (DONE)",
         }
-        WebEvent::Click { x, y } => println!("Klik koordinat: {}, {}", x, y),
+    }
+
+    pub fn is_finished(&self) -> bool {
+        matches!(self, Status::Done)
+    }
+
+    pub fn next(&self) -> Option<Status> {
+        match self {
+            Status::Todo => Some(Status::InProgress),
+            Status::InProgress => Some(Status::Done),
+            Status::Done => None,
+        }
     }
 }
 
-fn pattern_idioms_demo() {
-    // while let: loop selama pola masih cocok
-    let mut stack = vec![1, 2, 3];
-    while let Some(top) = stack.pop() {
-        println!("Pop: {}", top);
+// ==========================================
+// 2. Data-bearing Enum: TaskEvent
+// ==========================================
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaskEvent {
+    // A. Unit-like Variant
+    Created,
+
+    // B. Tuple-like Variant
+    AssignedTo(String),
+    StatusChanged(Status, Status),
+    LoggedHours(f64),
+
+    // C. Struct-like Variant
+    CommentAdded {
+        author: String,
+        content: String,
+        is_internal: bool,
+    },
+    Rescheduled {
+        new_deadline: String,
+        reason: String,
+    },
+}
+
+impl TaskEvent {
+    pub fn describe(&self) -> String {
+        match self {
+            TaskEvent::Created => "Event: Task baru saja dibuat.".to_string(),
+
+            // Match Tuple-like variant
+            TaskEvent::AssignedTo(user) => {
+                format!("Event: Task dialihkan penanggung jawabnya ke '{user}'.")
+            }
+            TaskEvent::StatusChanged(from, to) => {
+                format!(
+                    "Event: Status berubah dari '{}' -> '{}'.",
+                    from.label(),
+                    to.label()
+                )
+            }
+            TaskEvent::LoggedHours(hours) => {
+                format!("Event: Waktu kerja dicatat sebesar {hours:.1} jam.")
+            }
+
+            // Match Struct-like variant
+            TaskEvent::CommentAdded {
+                author,
+                content,
+                is_internal,
+            } => {
+                let badge = if *is_internal { "[Internal]" } else { "[Public]" };
+                format!("Event: Komentar baru dari {author} {badge}: \"{content}\"")
+            }
+            TaskEvent::Rescheduled {
+                new_deadline,
+                reason,
+            } => {
+                format!("Event: Jadwal diundur ke {new_deadline}. Alasan: {reason}")
+            }
+        }
+    }
+}
+```
+
+---
+
+### 3.3 Dasar-Dasar `match` Control Flow
+
+Bagi yang terbiasa dengan bahasa seperti C, C++, Java, atau JavaScript, kita sering menggunakan pernyataan `switch-case` atau rentetan panjang `if-else if-else` untuk mengecek banyak kemungkinan.
+
+Di Rust, peran tersebut digantikan dan ditingkatkan secara revolusioner oleh **`match`**.
+
+---
+
+#### 1. Apa Itu `match` dan Mengapa Bukan `switch`?
+
+`match` adalah mekanisme kendali alur (*control flow*) yang membandingkan sebuah nilai target dengan serangkaian **pola (patterns)** secara berurutan dari atas ke bawah. Cabang pertama yang polanya cocok akan langsung dieksekusi.
+
+**Mengapa Rust Meninggalkan `switch` Tradisional?**
+1. **Tidak Ada Bug *Fallthrough***: Pada `switch` konvensional di C/Java, jika kamu lupa menulis kata `break;`, kode akan "bocor" (*fall through*) dan mengeksekusi *case* di bawahnya secara tidak sengaja. Di Rust, **tidak butuh kata kunci `break`**; cabang yang cocok langsung selesai dan keluar.
+2. **`match` adalah Sebuah Expression**: `match` bukan sekadar *statement* (instruksi kosong), melainkan **ekspresi yang menghasilkan nilai kembalian (*return value*)**. Hasilnya bisa langsung ditampung ke dalam variabel.
+3. **Pemeriksaan Menyeluruh (*Exhaustive*)**: Compiler menjamin tidak ada satu pun kemungkinan nilai yang terlewat. Jika ada yang lupa ditangani, kode **gagal dikompilasi**.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        ANALOGI CARA KERJA MATCH                        │
+├────────────────────────────────────────────────────────────────────────┤
+│                       [ Nilai Masukan: 2 ]                             │
+│                                │                                       │
+│          ┌─────────────────────▼─────────────────────┐                 │
+│          │  Pola 1: `1`  ───► Tidak Cocok            │                 │
+│          ├───────────────────────────────────────────┤                 │
+│          │  Pola 2: `2`  ───► COCOK! ──► Eksekusi    │                 │
+│          ├───────────────────────────────────────────┤                 │
+│          │  Pola 3: `_`  ───► (Dilewati)             │                 │
+│          └───────────────────────────────────────────┘                 │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### 2. Anatomi Sintaksis `match`
+
+Setiap baris pilihan di dalam `match` disebut sebagai **Match Arm** (lengan cabang):
+
+```rust
+match nilai_target {
+    pola_1 => aksi_1,
+    pola_2 => aksi_2,
+    _ => aksi_default,
+}
+```
+
+Anatomi tiap arm terdiri dari 4 bagian:
+1. **Pola (*Pattern*)**: Nilai atau bentuk yang ingin dicocokkan (contoh: `Status::Todo`, `1`, `"admin"`).
+2. **Panah Gemuk (`=>`)**: Pemisah antara pola pengujian dan kode yang akan dijalankan (*fat arrow*).
+3. **Aksi / Ekspresi (*Expression*)**: Kode yang dieksekusi jika pola cocok. Jika lebih dari satu baris, gunakan kurung kurawal `{ ... }`.
+4. **Tanda Koma (`,`)**: Pemisah antar arm cabang. Koma wajib ditulis untuk ekspresi satu baris.
+
+```rust
+let nomor_hari = 3;
+
+let nama_hari = match nomor_hari {
+    1 => "Senin",
+    2 => "Selasa",
+    3 => "Rabu",
+    4 => "Kamis",
+    5 => "Jumat",
+    6 | 7 => "Akhir Pekan (Sabtu / Minggu)", // Operator | untuk multiple pattern
+    _ => "Nomor hari tidak valid",           // Wildcard catch-all
+};
+
+println!("Hari ke-{nomor_hari} adalah {nama_hari}");
+```
+
+---
+
+#### 3. Aturan Kritis: `match` adalah Expression
+
+Karena `match` adalah ekspresi, nilainya dapat langsung disimpan ke dalam `let`:
+
+> [!IMPORTANT]
+> **Aturan Keseragaman Tipe (Type Consistency):**  
+> Seluruh cabang (*arms*) di dalam sebuah ekspresi `match` **wajib mengembalikan tipe data yang persis sama!**  
+> Kamu tidak boleh mengembalikan `String` di cabang pertama tetapi mengembalikan angka `i32` di cabang kedua.
+
+```rust
+let role = "admin";
+
+// ✅ Benar: Semua cabang menghasilkan tipe &'static str
+let deskripsi = match role {
+    "admin" => "Akses seluruh sistem",
+    "member" => "Akses pengguna terdaftar",
+    _ => "Akses publik",
+};
+
+// ❌ Salah (Compile Error!): Cabang mengembalikan tipe data berbeda
+// let hasil = match role {
+//     "admin" => 100,       // i32
+//     _ => "tidak valid",   // &str -> ERROR E0308 (mismatched types)
+// };
+```
+
+---
+
+#### 4. Perbandingan Langsung: `if-else if-else` vs `match`
+
+Kapan kita sebaiknya menggunakan `match` alih-alih `if-else`?
+
+| Kriteria | `if-else` | `match` |
+|---|---|---|
+| **Fokus Evaluasi** | Kondisi boolean umum (`x > 5 && is_active`) | Mencocokkan bentuk data, nilai diskrit, atau varian enum |
+| **Kelelahan Compiler** | Jika ada kondisi terlewat, compiler diam saja (bisa muncul bug) | **Wajib Exhaustive**: Compiler melarang ada kasus terlewat |
+| **Dukungan Destructuring** | Terbatas (harus manual di dalam blok) | **Bawaan lahir**: Otomatis membongkar isi tuple/struct/enum |
+| **Keterbacaan Kode** | Menjadi berantakan jika banyak cabang (`else if` panjang) | Sangat rapi, deklaratif, dan mudah dipindai mata |
+
+---
+
+#### 5. Pola Tangkap-Semua: Wildcard (`_`)
+
+Dalam tipe data dengan kemungkinan tak terbatas (seperti integer `u32` atau string `&str`), kita tidak mungkin menulis semua angka dari 0 sampai 4 miliar. 
+
+Rust menyediakan pola **Wildcard** menggunakan simbol garis bawah (`_`):
+- `_` berarti: *"Cocokkan nilai apa pun selain pola yang sudah ditulis di atasnya."*
+- Pola `_` selalu diletakkan di **paling bawah** sebagai penutup penyelamat (*fallback*).
+
+```rust
+let kode_status_http = 404;
+
+match kode_status_http {
+    200 => println!("OK - Sukses"),
+    400 => println!("Bad Request"),
+    404 => println!("Not Found - Halaman tidak ditemukan"),
+    500 => println!("Internal Server Error"),
+    _ => println!("Kode status HTTP lain: {kode_status_http}"),
+}
+```
+
+---
+
+#### 6. Kode Mandiri: Basic Match Sederhana (`demo_basic_match`)
+
+Berikut contoh fungsi mandiri yang mengimplementasikan dasar-dasar `match`:
+
+```rust
+// Fungsi evaluasi angka dadu menggunakan basic match
+pub fn demo_basic_match(dice: u8) -> &'static str {
+    // 1. match mengevaluasi nilai argumen 'dice'
+    // 2. Setiap arm mengembalikan string literal &'static str
+    match dice {
+        1 => "Satu (Paling Rendah)",
+        2 | 3 => "Dua atau Tiga (Rendah)",       // Multiple pattern dengan operator '|'
+        4 | 5 => "Empat atau Lima (Sedang)",
+        6 => "Enam (Tertinggi)",
+        _ => "Bukan angka dadu standar",          // Wildcard fallback penutup
+    }
+}
+
+fn main() {
+    let roll = 3;
+    let hasil = demo_basic_match(roll);
+    println!("Hasil lemparan dadu {roll}: {hasil}");
+    // Output: Hasil lemparan dadu 3: Dua atau Tiga (Rendah)
+}
+```
+
+---
+
+### 3.4 Advanced Pattern Matching: Destructuring, Guards, Range, & Bindings
+
+Setelah memahami dasar-dasar `match`, sekarang kita melangkah ke fitur-fitur tingkat lanjut yang menjadikan pattern matching di Rust sangat kuat dalam memproses struktur data kompleks:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                      FITUR ADVANCED PATTERN MATCHING                   │
+├─────────────────────┬──────────────────────────┬───────────────────────┤
+│    Destructuring    │       Match Guard        │      Binding (@)      │
+│ Membongkar isi      │ Syarat boolean runtime   │ Tes range sekaligus   │
+│ struct / enum / data│ tambahan via `if`        │ ikat nilai ke variabel│
+├─────────────────────┼──────────────────────────┼───────────────────────┤
+│    Range Pattern    │          if let          │       while let       │
+│ Uji rentang inklusif│ Tangani tepat 1 pola     │ Loop iterasi selama   │
+│ angka: `0..=50`     │ tanpa boilerplate match  │ pola masih cocok      │
+└─────────────────────┴──────────────────────────┴───────────────────────┘
+```
+
+---
+
+#### 1. Destructuring (Membongkar Struktur Data)
+
+Pattern matching memungkinkan kamu membongkar data bersarang (*nested data*) secara langsung pada baris pola tanpa perlu mengakses field satu per satu:
+
+1. **Destructuring Struct di dalam Enum**:
+   ```rust
+   AppCommand::MoveTo(Coordinate { x, y }) => {
+       println!("Koordinat x: {x}, y: {y}");
+   }
+   ```
+2. **Destructuring Struct-like Variant**:
+   ```rust
+   AppCommand::SendMessage { sender, content } => {
+       println!("Dari {sender}: {content}");
+   }
+   ```
+
+---
+
+#### 2. Match Guard (`if <condition>`)
+
+Match guard adalah syarat boolean tambahan yang ditempelkan setelah pola menggunakan kata kunci `if`. Cabang ini hanya akan dieksekusi jika pola cocok **DAN** kondisi `if` bernilai `true`:
+
+```rust
+AppCommand::SendMessage { sender, content } if content.trim().is_empty() => {
+    format!("Pesan kosong dari '{sender}' diabaikan.")
+}
+```
+
+> [!WARNING]
+> **Match Guard Tidak Menjamin Exhaustiveness!**  
+> Compiler Rust tidak dapat memprediksi nilai runtime dari ekspresi boolean di dalam `if`. Oleh karena itu, arm yang memiliki match guard **tidak dihitung** oleh compiler untuk memenuhi syarat *exhaustive*. Kamu wajib menyediakan arm penutup (fallback) tanpa guard untuk varian terkait!
+
+---
+
+#### 3. Range Pattern (`start..=end`) & Binding (`@`)
+
+1. **Range Pattern**:
+   Menguji apakah suatu nilai numerik atau karakter berada di dalam rentang inklusif (`..=`):
+   ```rust
+   match score {
+       90..=100 => "A (Istimewa)",
+       80..=89  => "B (Baik)",
+       _        => "Lainnya",
+   }
+   ```
+
+2. **Binding Operator (`@`)**:
+   Seringkali kita ingin memastikan suatu nilai masuk ke dalam rentang tertentu, **sekaligus menyimpan nilai tersebut ke variabel baru** agar bisa dipakai di dalam blok eksekusi:
+   ```rust
+   // Variabel 'vol' mengikat nilai asli u8 yang lolos pengujian rentang 0..=30
+   AppCommand::SetVolume(vol @ 0..=30) => {
+       format!("Volume rendah disetel ke: {vol}%")
+   }
+   ```
+
+---
+
+#### 4. Idiom Ringkas: `if let` dan `while let`
+
+Untuk kasus sederhana di mana kamu tidak membutuhkan percabangan lengkap seluruh varian:
+
+1. **`if let` (Hanya Peduli 1 Pola)**:
+   Menghindari boilerplate `match` ketika hanya ingin mengekstrak satu nilai tertentu:
+   ```rust
+   if let AppCommand::MoveTo(Coordinate { x, y }) = cmd {
+       println!("Koordinat terdeteksi: ({x}, {y})");
+   } // Varian lainnya diabaikan secara elegan
+   ```
+
+2. **`while let` (Loop Selama Pola Cocok)**:
+   Sangat populer untuk menguras antrean (*draining a queue/stack*):
+   ```rust
+   let mut queue = vec![cmd1, cmd2, cmd3];
+   while let Some(command) = queue.pop() {
+       process_command(&command);
+   } // Loop otomatis berhenti seketika queue kosong (pop() menghasilkan None)
+   ```
+
+---
+
+#### 5. Rangkuman Cheat Sheet Seluruh Fitur Pattern Matching
+
+| Fitur | Contoh Sintaks | Fungsi / Kapan Digunakan |
+|---|---|---|
+| **Literal Match** | `Status::Todo => ...` | Mencocokkan nilai atau varian yang sudah pasti sama persis. |
+| **Multiple Patterns** | `'a' \| 'A' => ...` | Mencocokkan salah satu dari beberapa kemungkinan pola (*or pattern*). |
+| **Wildcard** | `_ => ...` | Menangkap seluruh nilai sisa (*catch-all*) untuk memastikan exhaustive. |
+| **Destructuring** | `Point { x, y } => ...` | Membongkar field struct/tuple langsung ke variabel lokal. |
+| **Range Pattern** | `1..=10 => ...` | Menguji apakah angka/karakter berada di dalam rentang inklusif. |
+| **Binding `@`** | `x @ 1..=10 => ...` | Menguji rentang sekaligus mengikat nilainya ke variabel `x`. |
+| **Match Guard** | `x if x % 2 == 0 => ...` | Menambahkan syarat logika boolean dinamis pada arm. |
+| **`if let`** | `if let Some(val) = opt { ... }` | Pintasan ringkas jika hanya ingin mengecek 1 varian saja. |
+| **`while let`** | `while let Some(i) = iter.next() { ... }` | Perulangan selama hasil fungsi masih cocok dengan polanya. |
+
+---
+
+#### 6. Kode Lengkap & Selaras Lab (`fase3_task_3.rs`)
+
+Berikut implementasi lengkap yang memadukan seluruh teknik pattern matching:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Coordinate {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UserRole {
+    Admin,
+    Moderator,
+    Member(u32), // Membawa level reputasi (1..=100)
+    Guest,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AppCommand {
+    Quit,
+    MoveTo(Coordinate),
+    SendMessage { sender: String, content: String },
+    SetVolume(u8), // Volume suara 0..=100
+}
+
+// 1. Match, Destructuring, Range, Binding @, & Match Guard
+pub fn process_command(cmd: &AppCommand) -> String {
+    match cmd {
+        // A. Match Varian Sederhana
+        AppCommand::Quit => "Aplikasi ditutup (Quit).".to_string(),
+
+        // B. Destructuring Struct & Binding @ pada Range
+        AppCommand::MoveTo(Coordinate { x: x @ 0..=50, y }) => {
+            format!("Berpindah ke area aman pojok kiri: x={x}, y={y}")
+        }
+        AppCommand::MoveTo(Coordinate { x, y }) => {
+            format!("Berpindah ke koordinat target: x={x}, y={y}")
+        }
+
+        // C. Destructuring Field Bernama & Match Guard
+        AppCommand::SendMessage { sender, content } if content.trim().is_empty() => {
+            format!("Pesan kosong dari '{sender}' diabaikan.")
+        }
+        AppCommand::SendMessage { sender, content } => {
+            format!("Pesan dari {sender}: \"{content}\"")
+        }
+
+        // D. Range Pattern & Binding @
+        AppCommand::SetVolume(vol @ 0..=30) => {
+            format!("Volume diatur rendah: {vol}%")
+        }
+        AppCommand::SetVolume(vol @ 31..=70) => {
+            format!("Volume diatur sedang: {vol}%")
+        }
+        AppCommand::SetVolume(vol @ 71..=100) => {
+            format!("Volume diatur tinggi: {vol}% (Peringatan pendengaran!)")
+        }
+        AppCommand::SetVolume(vol) => {
+            format!("Volume {vol}% melebihi batas aman 100%!")
+        }
+    }
+}
+
+// 2. Evaluasi Role dengan Match Guard & Binding @
+pub fn classify_role(role: &UserRole) -> String {
+    match role {
+        UserRole::Admin => "Akses Penuh (Super Admin)".to_string(),
+        UserRole::Moderator => "Akses Moderasi Konten".to_string(),
+
+        // Literal Pattern
+        UserRole::Member(0) => "Member Belum Terverifikasi (Level 0)".to_string(),
+
+        // Range Pattern dengan Binding @
+        UserRole::Member(level @ 1..=20) => {
+            format!("Member Pemula (Level {level})")
+        }
+        UserRole::Member(level @ 21..=70) => {
+            format!("Member Aktif (Level {level})")
+        }
+        // Match Guard
+        UserRole::Member(level) if *level > 70 => {
+            format!("Member Veteran / Elit (Level {level} - Hak Voting)")
+        }
+        // Fallback untuk menjamin exhaustiveness
+        UserRole::Member(level) => {
+            format!("Member Khusus (Level {level})")
+        }
+
+        UserRole::Guest => "Akses Tamu (Read-only)".to_string(),
+    }
+}
+
+// 3. Range Pattern Mandiri
+pub fn classify_grade(score: u32) -> &'static str {
+    match score {
+        90..=100 => "A (Istimewa)",
+        80..=89  => "B (Baik)",
+        70..=79  => "C (Cukup)",
+        0..=69   => "D (Perlu Perbaikan)",
+        _        => "Skor Tidak Valid (> 100)",
+    }
+}
+
+// 4. if let
+pub fn inspect_move(cmd: &AppCommand) -> Option<(i32, i32)> {
+    if let AppCommand::MoveTo(Coordinate { x, y }) = cmd {
+        Some((*x, *y))
+    } else {
+        None
+    }
+}
+
+// 5. while let
+pub fn process_queue(queue: &mut Vec<AppCommand>) -> Vec<String> {
+    let mut logs = Vec::new();
+    while let Some(cmd) = queue.pop() {
+        logs.push(process_command(&cmd));
+    }
+    logs
+}
+```
+
+---
+
+### 3.5 Mini Project Fase 3: Task Domain Model
+
+Mini project ini mengintegrasikan seluruh materi **Fase 3**: pemodelan domain menggunakan **Classic Struct**, **Enums**, **Methods (`&self`, `&mut self`)**, serta **Pattern Matching (`match`, `if let`, `while let`)**.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                     TASK DOMAIN MODEL ARCHITECTURE                     │
+├────────────────────────────────────────────────────────────────────────┤
+│  struct Task {                                                         │
+│      id: u64,                                                          │
+│      title: String,                                                    │
+│      priority: Priority,     ──► [Low, Medium, High, Critical]         │
+│      status: TaskStatus,     ──► [Todo -> InProgress -> Review -> Done]│
+│  }                                                                     │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### 1. Konsep Domain Modeling di Rust
+
+Berbeda dengan pemrograman berorientasi objek tradisional:
+- **Pemisahan State dan Behavior**: Data murni disimpan di dalam struct (`Task`), sedangkan aturan transisi dan method logika ditempatkan di dalam blok `impl Task`.
+- **Type-Safe State Machine**: Alur kerja task (`Todo` -> `InProgress` -> `Review` -> `Done`) dimodelkan dengan `enum TaskStatus`. Varian final (`Done`) tidak dapat dimajukan lagi, dicegah langsung oleh compiler via `Option<TaskStatus>` dan `Result`.
+- **Penyaringan Deklaratif**: Menggunakan `if let` untuk memfilter task kritis dan `while let` untuk memproses antrean pipeline hingga tuntas.
+
+---
+
+#### 2. Kriteria Kelulusan Fase 3 (*Competency Check*)
+
+1. **Mengapa `match` Wajib Exhaustive?**  
+   Mencegah *unhandled edge cases* di lingkungan produksi. Compiler Rust memastikan seluruh cabang terdefinisi sehingga aplikasi tidak akan mengalami *runtime panic* akibat kondisi tak terduga.
+2. **Kapan Memilih `if let` vs `match`?**  
+   Gunakan `if let` jika hanya tertarik pada **tepat satu pola spesifik** (contoh: hanya mencari task berkategori `Priority::Critical`) dan mengabaikan varian lainnya. Gunakan `match` jika seluruh kemungkinan varian memiliki konsekuensi logika tersendiri.
+3. **Kapan Memilih `while let`?**  
+   Gunakan `while let` untuk perulangan yang bergantung pada keluaran pola dinamis (contoh: menguras antrean antartask via `queue.pop()` sampai menghasilkan `None`).
+
+---
+
+#### 3. Kode Lengkap & Selaras Lab (`mini_project_3.rs`)
+
+Berikut implementasi lengkap dari laboratorium:
+
+```rust
+// ==========================================
+// 1. Enum Priority & TaskStatus
+// ==========================================
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Priority {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl Priority {
+    pub fn badge(&self) -> &'static str {
+        match self {
+            Priority::Low => "[LOW]",
+            Priority::Medium => "[MED]",
+            Priority::High => "[HIGH]",
+            Priority::Critical => "[CRITICAL]",
+        }
     }
 
-    // if let: ringkas jika hanya menguji 1 kondisi
-    let config_max = Some(100u32);
-    if let Some(max) = config_max {
-        println!("Max disetel ke: {}", max);
+    pub fn urgency_label(&self) -> &'static str {
+        match self {
+            Priority::Low => "Rendah - Backlog",
+            Priority::Medium => "Sedang - Sprint Reguler",
+            Priority::High => "Tinggi - Pekan Ini",
+            Priority::Critical => "Kritis - Hotfix Segera",
+        }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskStatus {
+    Todo,
+    InProgress,
+    Review,
+    Done,
+}
+
+impl TaskStatus {
+    pub fn badge(&self) -> &'static str {
+        match self {
+            TaskStatus::Todo => "[TODO]",
+            TaskStatus::InProgress => "[IN PROGRESS]",
+            TaskStatus::Review => "[IN REVIEW]",
+            TaskStatus::Done => "[DONE]",
+        }
+    }
+
+    pub fn is_done(&self) -> bool {
+        matches!(self, TaskStatus::Done)
+    }
+
+    // Transisi siklus hidup task
+    pub fn next(&self) -> Option<TaskStatus> {
+        match self {
+            TaskStatus::Todo => Some(TaskStatus::InProgress),
+            TaskStatus::InProgress => Some(TaskStatus::Review),
+            TaskStatus::Review => Some(TaskStatus::Done),
+            TaskStatus::Done => None,
+        }
+    }
+}
+
+// ==========================================
+// 2. Struct Task (Domain Model)
+// ==========================================
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Task {
+    pub id: u64,
+    pub title: String,
+    pub priority: Priority,
+    pub status: TaskStatus,
+}
+
+impl Task {
+    // 2a. Constructor
+    pub fn new(id: u64, title: &str, priority: Priority) -> Self {
+        Self {
+            id,
+            title: title.to_string(),
+            priority,
+            status: TaskStatus::Todo, // Status awal default adalah Todo
+        }
+    }
+
+    pub fn with_status(id: u64, title: &str, priority: Priority, status: TaskStatus) -> Self {
+        Self {
+            id,
+            title: title.to_string(),
+            priority,
+            status,
+        }
+    }
+
+    // 2b. Change status
+    pub fn change_status(&mut self, new_status: TaskStatus) {
+        self.status = new_status;
+    }
+
+    pub fn advance_status(&mut self) -> Result<TaskStatus, &'static str> {
+        match self.status.next() {
+            Some(next_status) => {
+                self.status = next_status;
+                Ok(self.status)
+            }
+            None => Err("Task sudah mencapai status final [DONE] dan tidak dapat dimajukan lagi"),
+        }
+    }
+
+    // 2c. Display task
+    pub fn display(&self) -> String {
+        format!(
+            "#{:<3} {:<10} {:<13} {}",
+            self.id,
+            self.priority.badge(),
+            self.status.badge(),
+            self.title
+        )
+    }
+
+    // 2d. Match berdasarkan priority
+    pub fn match_priority(&self) -> &'static str {
+        match self.priority {
+            Priority::Low => "Dapat dikerjakan saat ada waktu luang (Backlog).",
+            Priority::Medium => "Prioritas standar, harus selesai dalam sprint berjalan.",
+            Priority::High => "Prioritas tinggi, butuh perhatian khusus pekan ini.",
+            Priority::Critical => "Mendesak! Blokir rilis sampai masalah ini terselesaikan.",
+        }
+    }
+
+    // 2e. Match berdasarkan status
+    pub fn match_status(&self) -> &'static str {
+        match self.status {
+            TaskStatus::Todo => "Task tersimpan di antrean dan belum dimulai.",
+            TaskStatus::InProgress => "Sedang aktif dikerjakan oleh software engineer.",
+            TaskStatus::Review => "Kode telah disubmit, sedang menunggu QA & Code Review.",
+            TaskStatus::Done => "Pekerjaan tuntas, lolos verifikasi, dan siap rilis.",
+        }
+    }
+}
+
+// ==========================================
+// 3. Helper Functions: `if let` & `while let`
+// ==========================================
+
+// Menggunakan `if let` untuk menyaring task berstatus Critical
+pub fn filter_critical_tasks(tasks: &[Task]) -> Vec<&Task> {
+    let mut critical_list = Vec::new();
+    for task in tasks {
+        if let Priority::Critical = task.priority {
+            critical_list.push(task);
+        }
+    }
+    critical_list
+}
+
+// Menggunakan `while let` untuk memproses antrean task pipeline
+pub fn drain_task_pipeline(pipeline: &mut Vec<Task>) -> Vec<String> {
+    let mut execution_logs = Vec::new();
+    while let Some(mut task) = pipeline.pop() {
+        let prev_status = task.status;
+        let _ = task.advance_status();
+        execution_logs.push(format!(
+            "Task #{}: {} diproses dari {:?} -> {:?}",
+            task.id, task.title, prev_status, task.status
+        ));
+    }
+    execution_logs
 }
 ```
 

@@ -367,21 +367,21 @@ enum Status {
 }
 ```
 
-- [ ] Match enum.
-- [ ] Enum membawa data.
-- [ ] Struct-like enum variant.
-- [ ] Tuple-like enum variant.
+- [x] Match enum.
+- [x] Enum membawa data.
+- [x] Struct-like enum variant.
+- [x] Tuple-like enum variant.
 
 ## Task 3 — Pattern Matching
 
-- [ ] `match`
-- [ ] exhaustive matching
-- [ ] destructuring
-- [ ] match guard
-- [ ] `if let`
-- [ ] `while let`
-- [ ] range pattern
-- [ ] binding
+- [x] `match`
+- [x] exhaustive matching
+- [x] destructuring
+- [x] match guard
+- [x] `if let`
+- [x] `while let`
+- [x] range pattern
+- [x] binding
 
 ## Mini Project Fase 3 — Task Domain Model
 
@@ -396,17 +396,17 @@ Task
 ```
 
 Fitur:
-- [ ] Constructor.
-- [ ] Change status.
-- [ ] Display task.
-- [ ] Match berdasarkan priority.
-- [ ] Match berdasarkan status.
+- [x] Constructor.
+- [x] Change status.
+- [x] Display task.
+- [x] Match berdasarkan priority.
+- [x] Match berdasarkan status.
 
 ### Lulus fase
 
-- [ ] Bisa membuat domain model tanpa meniru contoh.
-- [ ] Bisa menjelaskan kenapa `match` harus exhaustive.
-- [ ] Bisa menggunakan `if let` dan `while let`.
+- [x] Bisa membuat domain model tanpa meniru contoh.
+- [x] Bisa menjelaskan kenapa `match` harus exhaustive.
+- [x] Bisa menggunakan `if let` dan `while let`.
 
 ---
 

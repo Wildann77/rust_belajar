@@ -4,8 +4,11 @@ mod fase2_task_3;
 mod fase2_task_4;
 mod fase2_task_5;
 mod fase3_task_1;
+mod fase3_task_2;
+mod fase3_task_3;
 mod mini_project_1;
 mod mini_project_2;
+mod mini_project_3;
 mod task_1;
 mod task_2;
 mod task_3;
@@ -38,4 +41,10 @@ fn main() {
     mini_project_2::run();
     println!();
     fase3_task_1::run();
+    println!();
+    fase3_task_2::run();
+    println!();
+    fase3_task_3::run();
+    println!();
+    mini_project_3::run();
 }
