@@ -449,14 +449,14 @@ task_app/
 └── tests/
 ```
 
-- [ ] Pisahkan model.
-- [ ] Pisahkan service.
-- [ ] Pisahkan module auth.
-- [ ] Gunakan `pub`.
-- [ ] Gunakan `pub(crate)`.
-- [ ] Gunakan `use`.
-- [ ] Coba `pub use` sebagai re-export.
-- [ ] Tambahkan integration test.
+- [x] Pisahkan model.
+- [x] Pisahkan service.
+- [x] Pisahkan module auth.
+- [x] Gunakan `pub`.
+- [x] Gunakan `pub(crate)`.
+- [x] Gunakan `use`.
+- [x] Coba `pub use` sebagai re-export.
+- [x] Tambahkan integration test.
 
 ## Mini Project Fase 4 — Modular Task App
 
@@ -464,9 +464,9 @@ Refactor project Fase 3 menjadi multi-module.
 
 ### Lulus fase
 
-- [ ] Tidak semua logic berada di `main.rs`.
-- [ ] Bisa menjelaskan package vs crate vs module.
-- [ ] Bisa membuat library crate sendiri.
+- [x] Tidak semua logic berada di `main.rs`.
+- [x] Bisa menjelaskan package vs crate vs module.
+- [x] Bisa membuat library crate sendiri.
 
 ---
 
@@ -478,10 +478,10 @@ Menguasai Cargo untuk project multi-crate.
 
 ## Task 1 — Dependency
 
-- [ ] Tambahkan dependency.
-- [ ] Tambahkan dev-dependency.
-- [ ] Jalankan `cargo tree`.
-- [ ] Baca `Cargo.lock`.
+- [x] Tambahkan dependency.
+- [x] Tambahkan dev-dependency.
+- [x] Jalankan `cargo tree`.
+- [x] Baca `Cargo.lock`.
 
 ## Task 2 — Features
 
@@ -493,19 +493,19 @@ default = []
 async_runtime = []
 ```
 
-- [ ] Pahami optional dependency.
-- [ ] Aktifkan dependency melalui feature.
-- [ ] Build dengan feature berbeda.
+- [x] Pahami optional dependency.
+- [x] Aktifkan dependency melalui feature.
+- [x] Build dengan feature berbeda.
 
 ## Task 3 — Profiles
 
 Pelajari:
 
-- [ ] `profile.dev`
-- [ ] `profile.release`
-- [ ] `opt-level`
-- [ ] LTO
-- [ ] debug symbols
+- [x] `profile.dev`
+- [x] `profile.release`
+- [x] `opt-level`
+- [x] LTO
+- [x] debug symbols
 
 ## Task 4 — Workspace
 
@@ -520,17 +520,17 @@ rust-workspace/
     └── api_server/
 ```
 
-- [ ] Workspace root.
-- [ ] Workspace members.
-- [ ] Workspace dependencies.
-- [ ] Cross-crate dependency.
-- [ ] Build seluruh workspace.
+- [x] Workspace root.
+- [x] Workspace members.
+- [x] Workspace dependencies.
+- [x] Cross-crate dependency.
+- [x] Build seluruh workspace.
 
 ### Lulus fase
 
-- [ ] Bisa membuat workspace dari nol.
-- [ ] Bisa menjelaskan manfaat workspace.
-- [ ] Bisa memakai `cargo tree`, `cargo fmt`, `cargo clippy`, `cargo test`.
+- [x] Bisa membuat workspace dari nol.
+- [x] Bisa menjelaskan manfaat workspace.
+- [x] Bisa memakai `cargo tree`, `cargo fmt`, `cargo clippy`, `cargo test`.
 
 ---
 

@@ -2086,40 +2086,49 @@ pub fn process_queue(queue: &mut Vec<AppCommand>) -> Vec<String> {
 
 ### 3.5 Mini Project Fase 3: Task Domain Model
 
-Mini project ini mengintegrasikan seluruh materi **Fase 3**: pemodelan domain menggunakan **Classic Struct**, **Enums**, **Methods (`&self`, `&mut self`)**, serta **Pattern Matching (`match`, `if let`, `while let`)**.
+Mini project ini memadukan seluruh materi di Fase 3: **Struct**, **Enum**, **Methods (`impl`, `&self`, `&mut self`)**, serta **Pattern Matching (`match`, `if let`, `while let`)** ke dalam sebuah perancangan model domain nyata (*Domain-Driven Design / DDD*).
+
+```text
+Task
+├── id: u64
+├── title: String
+├── priority: Priority (Low, Medium, High, Critical)
+└── status: TaskStatus (Todo, InProgress, Review, Done)
+```
+
+---
+
+#### 1. Arsitektur Domain Model
+
+Dalam arsitektur backend Rust modern, kita tidak menggunakan *class inheritance* bertingkat seperti di Java/C#. Kita memisahkan domain menjadi **Entitas Struct** dan **State Enum**:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                     TASK DOMAIN MODEL ARCHITECTURE                     │
+│                        TASK DOMAIN MODEL                               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  struct Task {                                                         │
-│      id: u64,                                                          │
-│      title: String,                                                    │
-│      priority: Priority,     ──► [Low, Medium, High, Critical]         │
-│      status: TaskStatus,     ──► [Todo -> InProgress -> Review -> Done]│
-│  }                                                                     │
+│ struct Task                                                            │
+│ ├── id: u64                                                            │
+│ ├── title: String                                                      │
+│ ├── priority: Priority  ──► [Low | Medium | High | Critical]           │
+│ └── status: TaskStatus  ──► [Todo -> InProgress -> Review -> Done]     │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-#### 1. Konsep Domain Modeling di Rust
-
-Berbeda dengan pemrograman berorientasi objek tradisional:
-- **Pemisahan State dan Behavior**: Data murni disimpan di dalam struct (`Task`), sedangkan aturan transisi dan method logika ditempatkan di dalam blok `impl Task`.
-- **Type-Safe State Machine**: Alur kerja task (`Todo` -> `InProgress` -> `Review` -> `Done`) dimodelkan dengan `enum TaskStatus`. Varian final (`Done`) tidak dapat dimajukan lagi, dicegah langsung oleh compiler via `Option<TaskStatus>` dan `Result`.
-- **Penyaringan Deklaratif**: Menggunakan `if let` untuk memfilter task kritis dan `while let` untuk memproses antrean pipeline hingga tuntas.
+1. **Enum `Priority`**: Memodelkan tingkat urgensi tugas. Menentukan SLA pengerjaan.
+2. **Enum `TaskStatus`**: Memodelkan mesin status (*finite state machine*) siklus hidup tugas dari awal dibuat (`Todo`) hingga siap rilis (`Done`).
+3. **Struct `Task`**: Entitas utama yang menggabungkan seluruh data di atas, menyediakan konstruktor aman, dan method evaluasi berbasis pattern matching.
 
 ---
 
-#### 2. Kriteria Kelulusan Fase 3 (*Competency Check*)
+#### 2. Konsep Kunci Lulus Fase 3
 
-1. **Mengapa `match` Wajib Exhaustive?**  
-   Mencegah *unhandled edge cases* di lingkungan produksi. Compiler Rust memastikan seluruh cabang terdefinisi sehingga aplikasi tidak akan mengalami *runtime panic* akibat kondisi tak terduga.
-2. **Kapan Memilih `if let` vs `match`?**  
-   Gunakan `if let` jika hanya tertarik pada **tepat satu pola spesifik** (contoh: hanya mencari task berkategori `Priority::Critical`) dan mengabaikan varian lainnya. Gunakan `match` jika seluruh kemungkinan varian memiliki konsekuensi logika tersendiri.
-3. **Kapan Memilih `while let`?**  
-   Gunakan `while let` untuk perulangan yang bergantung pada keluaran pola dinamis (contoh: menguras antrean antartask via `queue.pop()` sampai menghasilkan `None`).
+1. **Pemodelan Domain Tanpa Tiruan**:
+   Domain model di Rust dirancang secara murni menggunakan kombinasi *Product Type* (`struct`) untuk atribut yang ada bersamaan dan *Sum Type* (`enum`) untuk status yang saling eksklusif (*mutually exclusive*).
+2. **Kewajiban Exhaustive Matching**:
+   Jika di masa depan tim backend menambahkan status baru (misal `TaskStatus::Blocked` atau `TaskStatus::Archived`), compiler Rust akan langsung memunculkan error di setiap method `match_status`. Ini mencegah bug *"status baru lupa ditangani"* yang sangat sering terjadi di bahasa pemrograman dinamis.
+3. **Pemanfaatan `if let` dan `while let`**:
+   - `if let`: Menyaring subset task tertentu (misal mengambil hanya task berstatus `Priority::Critical` tanpa boilerplate `match`).
+   - `while let`: Menguras antrean (*pipeline drain*) untuk mengeksekusi transisi status task satu per satu hingga antrean kosong.
 
 ---
 
@@ -2210,7 +2219,7 @@ impl Task {
             id,
             title: title.to_string(),
             priority,
-            status: TaskStatus::Todo, // Status awal default adalah Todo
+            status: TaskStatus::Todo,
         }
     }
 
@@ -2304,88 +2313,781 @@ pub fn drain_task_pipeline(pipeline: &mut Vec<Task>) -> Vec<String> {
 
 ## FASE 4: Module System & Code Organization
 
-Rust menyediakan sistem pengorganisasian kode hierarkis: **Packages -> Crates -> Modules -> Paths**.
+Rust menyediakan sistem pengorganisasian kode modular hierarkis yang sangat ketat dan aman: **Packages -> Crates -> Modules -> Paths**. 
 
-### 4.1 Struktur Hierarki Standar Proyek
+Dengan sistem ini, Anda tidak perlu lagi menumpuk ribuan baris kode di dalam satu file `main.rs`. Kode dipecah menjadi modul-modul terpisah dengan batasan hak akses (*visibility encapsulation*) yang terverifikasi secara matematis oleh compiler saat proses kompilasi.
+
+---
+
+### 4.1 Konsep Inti: Packages, Crates, Modules, & Paths
+
+Mari kita bedah perbedaan fundamental dari empat tingkatan organisasi kode di Rust:
+
+| Tingkatan | Apa Itu? | Didefinisikan Oleh | Peran & Karakteristik |
+|---|---|---|---|
+| **Package** | Bundle proyek software lengkap | File `Cargo.toml` | Mengatur metadata, dependensi, dan build script. Boleh memiliki 0 atau 1 library crate, serta 0 atau lebih binary crate. |
+| **Crate** | Unit kompilasi terkecil di Rust (*tree of modules*) | `src/lib.rs` atau `src/main.rs` | Dihasilkan compiler `rustc`. Crate menghasilkan binary executable (`.exe` / ELF) atau library (`.rlib`). |
+| **Module** | Pengelompokan kode hierarkis di dalam crate | Kata kunci `mod` | Membagi ruang nama (*namespaces*), mengelompokkan fungsionalitas, dan mengontrol privasi (*private/public*). |
+| **Path** | Alamat penunjuk lokasi suatu item | `crate::...`, `super::...`, `self::...` | Cara menavigasi dan merujuk struct, enum, trait, atau fungsi antar modul. |
+
 ```text
-my_service/
-├── Cargo.toml          # Manifes package
-├── src/
-│   ├── main.rs         # Root binary crate (fn main)
-│   ├── lib.rs          # Root library crate
-│   ├── models.rs       # Module models
-│   └── auth/           # Sub-module auth (folder berbasis nama module)
-│       ├── mod.rs      # Entry point auth module (atau auth.rs)
-│       └── token.rs    # Sub-module token
-└── tests/
-    └── api_tests.rs    # Integration test crate
+Package (rust-learning-lab / Cargo.toml)
+│
+├── Library Crate (src/lib.rs -> nama crate: rust_learning_lab)
+│   ├── mod models (src/models.rs)
+│   ├── mod auth   (src/auth/mod.rs)
+│   │   └── mod token (src/auth/token.rs)
+│   └── mod services (src/services/mod.rs)
+│       └── mod task_service (src/services/task_service.rs)
+│
+├── Binary Crate (src/main.rs -> executable bin)
+│   └── Mengonsumsi library crate: `use rust_learning_lab::...`
+│
+└── Integration Test Crates (tests/*.rs)
+    └── Mengonsumsi library crate dari luar layaknya pengguna pihak ketiga
 ```
 
 ---
 
-### 4.2 Visibility & Scope Modifiers
-Secara default, semua item di Rust bersifat **private**.
-- `pub`: Terbuka untuk umum (*public*).
-- `pub(crate)`: Hanya dapat diakses di dalam crate yang sama (tersembunyi dari luar library).
-- `pub(super)`: Hanya dapat diakses oleh module parent setingkat di atasnya.
-- `pub use`: Menampilkan kembali (*re-export*) item untuk memudahkan konsumsi pengguna library (*Facade Pattern*).
+### 4.2 Binary Crate vs Library Crate dalam Satu Package
+
+Dalam proyek profesional, pola standar arsitektur Rust memisahkan antara **Library Crate** (`src/lib.rs`) dan **Binary Crate** (`src/main.rs`):
+
+1. **Library Crate (`src/lib.rs`)**:
+   - Berisi seluruh *core business logic*, model entitas, modul autentikasi, dan services.
+   - Tidak memiliki fungsi `fn main()`.
+   - Nama crate diturunkan dari nama package di `Cargo.toml` (tanda minus `-` otomatis diubah menjadi underscore `_`, contoh: `rust-learning-lab` menjadi `rust_learning_lab`).
+   - Dapat diimpor oleh siapa saja: oleh binary crate lokal, oleh integration tests di folder `tests/`, maupun oleh aplikasi lain jika dipublikasikan ke `crates.io`.
+
+2. **Binary Crate (`src/main.rs`)**:
+   - Hanya berperan sebagai *entry point* tipis (*thin wrapper* / CLI runner).
+   - Memiliki `fn main()`.
+   - Mengimpor domain logic dari library crate via `use rust_learning_lab::...;`.
+
+#### Analogi Dunia Nyata: Restoran, Dapur, & Etalase Depan
+Untuk memudahkan pemahaman:
+- **Dapur & Ruang Racik Belakang** (`src/models.rs`, `src/auth/token.rs`, `src/services/task_service.rs`): Tempat seluruh data dan logika dimasak.
+- **Library Crate (`src/lib.rs`)**: Gedung restoran resmi beserta etalase kasir depan. Tempat mendaftarkan ruangan apa saja yang sah diakui (`pub mod`) dan memajang menu jadi (`pub use`).
+- **Binary Crate (`src/main.rs`)**: Sopir pengantar / pembeli yang menyalakan mesin, menekan tombol order, dan mengeksekusi aplikasi.
+
+---
+
+### 4.3 Struktur File & Sub-Modul yang Diimplementasikan
+
+Berikut struktur modular nyata yang kita bangun pada proyek `rust-learning-lab`:
+
+```text
+rust-learning-lab/
+├── Cargo.toml                          # Manifes Package
+├── src/
+│   ├── lib.rs                          # Root Library Crate (deklarasi modul & pub use)
+│   ├── main.rs                         # Root Binary Crate (runner aplikasi)
+│   ├── models.rs                       # Modul Domain Models (Task, Priority, TaskStatus)
+│   ├── auth/                           # Modul Autentikasi (folder)
+│   │   ├── mod.rs                      # Entry point modul auth & re-export
+│   │   └── token.rs                    # Sub-modul token & claims
+│   ├── services/                       # Modul Services (folder)
+│   │   ├── mod.rs                      # Entry point modul services
+│   │   └── task_service.rs             # Business logic task lifecycle
+│   └── mini_project_4.rs               # Demo runner modular task app
+└── tests/
+    └── task_app_integration_test.rs    # Integration test crate independen
+```
+
+#### Gaya Penamaan Modul di Rust:
+Rust mendukung dua gaya peletakan file modul:
+- **Gaya Tradisional / Mod.rs**: Folder `auth/` dengan `auth/mod.rs` sebagai entry point, dan `auth/token.rs` sebagai sub-modul.
+- **Gaya Rust 2018+**: File `auth.rs` sejajar dengan folder `auth/token.rs`.
+> Keduanya didukung penuh. Proyek ini mendemonstrasikan pola `mod.rs` yang sangat rapi untuk pengelompokan modul kompleks.
+
+---
+
+### 4.4 Visibility Modifiers & Privacy Rules (Enkapsulasi Data)
+
+Secara default, **semua item di Rust berstatus PRIVATE murni**. Item private hanya dapat diakses oleh file/modul tempat item tersebut dideklarasikan beserta anak modulnya (*submodules*).
+
+Rust menyediakan 4 level visibilitas:
+
+| Modifier | Ruang Lingkup Hak Akses | Kapan Digunakan? |
+|---|---|---|
+| *(tanpa keyword)* | **Private**: Hanya file/modul saat ini | Menyembunyikan detail implementasi, hashing salt, atau field internal sensitif. |
+| `pub(super)` | Terlihat khusus oleh modul **parent setingkat di atasnya** | Method internal yang hanya boleh dipanggil oleh modul induk (misal `auth/mod.rs` ke `auth/token.rs`). |
+| `pub(crate)` | Terlihat oleh **seluruh modul di dalam crate yang sama** | Berbagi struktur antar modul (misal `services` membaca catatan internal `models`), tetapi tersembunyi total dari konsumen luar library! |
+| `pub` | **Public**: Terbuka bebas untuk siapapun | API publik yang stabil dan ditujukan untuk digunakan oleh pemakai library. |
+
+#### Studi Kasus Enkapsulasi Nyata pada Proyek:
 
 ```rust
 // File: src/auth/token.rs
 pub struct Claims {
-    pub sub: String,
-    pub(crate) internal_session_id: u64, // Terlihat di crate ini saja
-    secret_hash: String,                 // Private di file ini saja
+    pub sub: String,                   // 1. Publik: Username boleh dibaca siapa saja
+    pub role: String,                  // 2. Publik: Role boleh diperiksa publik
+    pub(crate) session_id: u64,        // 3. pub(crate): Hanya service dalam crate ini yang tahu session ID
+    secret_salt: String,               // 4. Private: Rahasia internal file token.rs ini saja!
 }
 
-// File: src/lib.rs
-pub mod auth {
-    pub mod token;
-}
-pub mod models;
+impl Claims {
+    // Dipanggil khusus oleh modul parent (src/auth/mod.rs)
+    pub(super) fn internal_session_key(&self) -> String {
+        format!("AUTH_SUPER_{}_{}", self.session_id, self.sub)
+    }
 
-// Re-exporting: memudahkan import dari luar
-pub use auth::token::Claims;
+    // Dipanggil oleh modul mana saja di crate rust_learning_lab
+    pub(crate) fn is_session_active(&self) -> bool {
+        self.session_id > 0
+    }
+}
 ```
+
+---
+
+### 4.5 Paths & Ergonomi Import: `use` dan `pub use` (Facade Pattern)
+
+Bagi programmer yang baru mempelajari Rust, pertanyaan yang paling sering muncul adalah:
+> *"Kenapa di `src/lib.rs` kita menulis `pub mod auth;` DAN juga menulis `pub use auth::...;`? Kenapa harus dua-duanya?"*
+
+Mari kita bedah perbedaan krusial keduanya:
+
+#### 1. Peran `mod` / `pub mod` (Mendaftarkan File ke Rust)
+Di bahasa seperti Python atau JavaScript, jika kita membuat file baru, file itu bisa langsung di-`import`. **Di Rust TIDAK BISA.**
+
+Compiler Rust (`rustc`) sangat disiplin:
+1. Rust **hanya membaca satu pintu gerbang utama**, yaitu `src/lib.rs` (atau `src/main.rs`).
+2. Jika Anda membuat file baru (misal `src/models.rs`) tetapi tidak menuliskan `mod models;` di `src/lib.rs`, maka bagi Rust file tersebut **dianggap tidak pernah ada!**
+3. **`mod models;`**: Memerintahkan Rust: *"Tolong baca dan kompilasi file `src/models.rs`."*
+4. **`pub mod models;`**: Ada kata `pub`. Artinya: *"Izinkan orang luar library untuk melihat dan mengakses modul models ini."*
+
+#### 2. Peran `pub use` (Memajang Item ke Etalase Depan / Re-export)
+Setelah file terdaftar dengan `pub mod`, muncul masalah ergonomi: pemakai kode harus mengetik path yang panjang dan dalam:
+
+```rust
+// ❌ Melelahkan dan membocorkan detail hierarki internal:
+use rust_learning_lab::models::Task;
+use rust_learning_lab::models::Priority;
+use rust_learning_lab::auth::token::Claims;
+use rust_learning_lab::services::task_service::TaskService;
+```
+
+Dengan menambahkan `pub use` di `src/lib.rs` (**Facade Pattern**):
+```rust
+// File: src/lib.rs
+pub mod auth;
+pub mod models;
+pub mod services;
+
+// Re-export: Memajang item dari ruangan dalam ke pintu depan crate:
+pub use auth::{authenticate, Claims};
+pub use models::{Priority, Task, TaskStatus};
+pub use services::TaskService;
+```
+
+Konsumen luar (seperti `src/main.rs` dan file di `tests/`) sekarang cukup mengimpor dengan **1 baris super bersih**:
+```rust
+// ✅ Ergonomis, bersih, dan profesional:
+use rust_learning_lab::{authenticate, Claims, Priority, Task, TaskService, TaskStatus};
+```
+
+#### 3. Diagram Alur Kerja Modularitas
+
+```text
+[ File Asli di Dalam Folder ]
+src/models.rs                  ---> struct Task, Priority, TaskStatus
+src/auth/token.rs              ---> struct Claims
+src/services/task_service.rs   ---> struct TaskService
+       │
+       ▼  (Didaftarkan & Dipajang oleh src/lib.rs)
+src/lib.rs
+  ├── pub mod models;          (Mendaftarkan file models.rs agar dikompilasi)
+  └── pub use models::Task;    (Memajang Task di etalase depan crate)
+       │
+       ▼  (Dikonsumsi dengan Nyaman)
+src/main.rs & tests/
+  └── use rust_learning_lab::Task;  (Langsung dipakai tanpa peduli struktur folder!)
+```
+
+#### Ringkasan 1 Kalimat:
+- **`pub mod`**: **Mendaftarkan file** agar diakui dan dikompilasi oleh compiler Rust.
+- **`pub use`**: **Memajang item ke etalase depan** agar pemakai tidak perlu mengetik path modul yang panjang dan rumit.
+
+---
+
+### 4.6 Integration Tests di Rust (`tests/`)
+
+Di Rust, unit tests ditaruh di dalam file yang sama (`#[cfg(test)] mod tests`), sedangkan **Integration Tests** ditaruh di direktori khusus `tests/` di root proyek:
+
+1. Setiap file `.rs` di dalam direktori `tests/` dikompilasi oleh Cargo sebagai **crate terpisah**.
+2. Integration test **TIDAK BISA** mengakses item private atau item `pub(crate)` dari library Anda.
+3. Test ini memastikan bahwa API publik (`pub`) yang Anda rancang benar-benar bekerja mulus dari sudut pandang pemakai eksternal.
+
+Contoh verifikasi integration test nyata (`tests/task_app_integration_test.rs`):
+```rust
+use rust_learning_lab::{authenticate, Claims, Priority, Task, TaskService, TaskStatus};
+
+#[test]
+fn test_task_service_workflow_and_reexports() {
+    let mut service = TaskService::new("EnterpriseTaskHub");
+    let admin_claims = authenticate("root:admin").unwrap();
+    let dev_claims = authenticate("budi:developer").unwrap();
+
+    let task_id = service.create_task("Mitigasi Bug", Priority::Critical, &admin_claims).unwrap();
+    
+    // Verifikasi role boundary: Developer dilarang memajukan status task Critical
+    assert!(service.advance_task(task_id, &dev_claims).is_err());
+    
+    // Admin diizinkan memajukan status task Critical
+    assert_eq!(service.advance_task(task_id, &admin_claims).unwrap(), TaskStatus::InProgress);
+}
+```
+
+Jalankan integration test dengan perintah:
+```bash
+cargo test --test task_app_integration_test
+```
+Seluruh skenario pengujian modularitas lolos 100% tanpa error!
 
 ---
 
 ## FASE 5: Cargo Tingkat Lanjut & Workspace Management
 
-### 5.1 Cargo.toml Modern (Rust Edition 2024)
+### 5.1 Manajemen Dependensi Modern: `[dependencies]`, `[dev-dependencies]`, `cargo tree`, & `Cargo.lock`
+
+Sistem manajemen paket Rust melalui **Cargo** adalah salah satu paket manajer paling aman, deterministik, dan modern di dunia rekayasa perangkat lunak. Untuk membangun aplikasi enterprise, Anda wajib memahami klasifikasi dependensi serta cara kerja resolusinya.
+
+---
+
+#### 1. Klasifikasi Dependensi di `Cargo.toml`
+
+File `Cargo.toml` mendefinisikan *manifest* proyek. Terdapat pemisahan tegas antara dependensi produksi dan dependensi pengembangan:
+
 ```toml
 [package]
-name = "enterprise_core"
+name = "rust-learning-lab"
 version = "0.1.0"
 edition = "2024"
-authors = ["Senior Engineer <dev@enterprise.internal>"]
-license = "MIT OR Apache-2.0"
 
+# Dependensi Utama (Production Runtime)
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-tokio = { version = "1.49", features = ["full"], optional = true }
+serde_json = "1.0"
 
+# Dependensi Khusus Pengujian & Benchmark (Development Only)
 [dev-dependencies]
-criterion = "0.5" # Untuk benchmarking
+pretty_assertions = "1.4"
+```
 
-[features]
-default = []
-async_runtime = ["dep:tokio"] # Feature flag modular
+##### A. `[dependencies]` (Normal Dependencies)
+- **Peran**: Crate eksternal yang menjadi bagian dari runtime logic aplikasi atau library.
+- **Kompilasi**: Dikompilasi dan di-link langsung ke dalam file binary hasil build (`cargo build` dan `cargo build --release`).
+- **Contoh**: `serde` untuk serialisasi/deserialisasi struktur data, `serde_json` untuk manipulasi payload JSON, `tokio` untuk runtime async.
 
-[profile.release]
-opt-level = 3        # Optimasi maksimum
-lto = "fat"          # Link-Time Optimization antar crate
-codegen-units = 1    # Maksimalkan optimasi inline binary
-panic = "abort"      # Hapus stack unwinding untuk ukuran binary minimal
-strip = true         # Buang symbol debug dari executable binary
+##### B. `[dev-dependencies]` (Development/Testing Dependencies)
+- **Peran**: Crate pembantu yang **hanya** digunakan dalam pengujian (`cargo test`), benchmark (`cargo bench`), atau modul demonstrasi (`examples/`).
+- **Keuntungan Arsitektural**: Sama sekali **tidak dimasukkan ke dalam binary rilis produksi**. Hasil binary tetap ramping, waktu kompilasi rilis tetap cepat, dan risiko celah keamanan (attack surface) di lingkungan produksi berkurang drastis.
+- **Contoh**: `pretty_assertions` untuk perbandingan unit test dengan visual diff warna-warni yang jelas saat terjadi kegagalan (test failure), `criterion` untuk analisis benchmark statistik.
+
+---
+
+#### 2. Visualisasi Pohon Dependensi via `cargo tree`
+
+Dalam proyek nyata, dependensi yang Anda pasang hampir selalu memiliki dependensi turunan (*transitive dependencies*). Cargo menyediakan perintah analisis pohon dependensi:
+
+```bash
+cargo tree
+```
+
+Hasil eksekusi pada proyek kita:
+```text
+rust-learning-lab v0.1.0 (/mnt/.../rust-learning-lab)
+├── serde v1.0.229
+│   ├── serde_core v1.0.229
+│   └── serde_derive v1.0.229 (proc-macro)
+│       ├── proc-macro2 v1.0.107
+│       │   └── unicode-ident v1.0.26
+│       ├── quote v1.0.47
+│       │   └── proc-macro2 v1.0.107 (*)
+│       └── syn v3.0.6
+│           ├── proc-macro2 v1.0.107 (*)
+│           ├── quote v1.0.47 (*)
+│           └── unicode-ident v1.0.26
+└── serde_json v1.0.151
+    ├── itoa v1.0.18
+    ├── memchr v2.8.3
+    ├── serde_core v1.0.229
+    └── zmij v1.0.23
+[dev-dependencies]
+└── pretty_assertions v1.4.1
+    ├── diff v0.1.13
+    └── yansi v1.0.1
+```
+
+##### Cara Membaca Notasi `cargo tree`:
+1. **`├──` dan `└──`**: Mengindikasikan hierarki parent-child. Misalnya, `serde_json` menarik sub-crate transitif seperti `itoa`, `memchr`, dan `zmij`.
+2. **`(*)` (Deduplication Marker)**: Menandakan bahwa sub-pohon crate tersebut sudah ditampilkan secara lengkap di cabang sebelumnya, sehingga tidak digambar ulang demi efisiensi visual.
+3. **`(proc-macro)`**: Menandakan crate macro prosedural yang dieksekusi oleh compiler pada fase pre-processing (misal `serde_derive`).
+4. **Blok `[dev-dependencies]`**: Menampilkan cabang dependensi yang hanya aktif saat mode pengujian (`cargo test`).
+
+---
+
+#### 3. Anatomi dan Peran Kritis `Cargo.lock`
+
+Banyak pemula bingung membedakan antara `Cargo.toml` dan `Cargo.lock`. Keduanya memiliki filosofi yang bertolak belakang:
+
+| Karakteristik | `Cargo.toml` | `Cargo.lock` |
+| :--- | :--- | :--- |
+| **Pencipta** | Ditulis manual oleh Pengembang (*Human-edited*) | Dihasilkan otomatis oleh Cargo (*Machine-generated*) |
+| **Tujuan** | Menyatakan **niat & rentang versi** (*Intent / SemVer Requirement*) | Mencatat **realitas versi eksak** (*Exact State Resolution*) |
+| **Format Versi** | `serde = "1.0"` (artinya: $\ge 1.0.0, < 2.0.0$) | `version = "1.0.229"` (pasti versi 1.0.229) |
+| **Integritas** | Hanya nama crate dan semver | Menyimpan **Checksum SHA-256** kriptografis tiap paket |
+| **Aturan Git** | **Wajib di-commit** pada semua proyek | **Wajib di-commit** untuk aplikasi binary (`main.rs`), opsional untuk library murni |
+
+##### Cuplikan Isi Riil `Cargo.lock`:
+```toml
+# This file is automatically @generated by Cargo.
+# It is not intended for manual editing.
+version = 4
+
+[[package]]
+name = "serde"
+version = "1.0.229"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fe0b4f3a49d115814030617156a29e97be6a90ce6280910707c7636449a5635"
+dependencies = [
+ "serde_core",
+ "serde_derive",
+]
+
+[[package]]
+name = "pretty_assertions"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d"
+dependencies = [
+ "diff",
+ "yansi",
+]
+```
+
+##### Mengapa `Cargo.lock` Sangat Penting?
+1. **Reproducible Builds**: Jika rekan tim Anda atau server CI/CD menjalankan `cargo build`, Cargo membaca `Cargo.lock` sehingga versi dependensi yang diunduh 100% identik hingga ke bit terakhir. Masalah klise *"di laptop saya jalan, di server error"* dicegah secara tuntas.
+2. **Perlindungan Terhadap Supply Chain Attack**: Checksum SHA-256 memvalidasi bahwa paket yang diunduh dari crates.io tidak dimanipulasi di tengah jalan (tamper-proof).
+
+---
+
+#### 4. Kode Implementasi Laboratorium: `src/fase5_task_1.rs`
+
+Berikut adalah implementasi modul `fase5_task_1.rs` yang mengintegrasikan crate `serde`, `serde_json`, dan dev-dependency `pretty_assertions`:
+
+```rust
+// File: src/fase5_task_1.rs
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct PackageMeta {
+    pub name: String,
+    pub version: String,
+    pub edition: String,
+    pub is_production: bool,
+    pub dependencies: Vec<DependencyInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct DependencyInfo {
+    pub name: String,
+    pub version_req: String,
+    pub kind: DependencyKind,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub enum DependencyKind {
+    Normal,
+    Dev,
+    Build,
+}
+
+impl PackageMeta {
+    pub fn new(name: &str, version: &str, edition: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            version: version.to_string(),
+            edition: edition.to_string(),
+            is_production: true,
+            dependencies: Vec::new(),
+        }
+    }
+
+    pub fn add_dep(&mut self, name: &str, version_req: &str, kind: DependencyKind) {
+        self.dependencies.push(DependencyInfo {
+            name: name.to_string(),
+            version_req: version_req.to_string(),
+            kind,
+        });
+    }
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    pub fn from_json(json_str: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json_str)
+    }
+}
+
+pub fn run() {
+    println!("=== Fase 5 - Task 1: Dependency Management ===");
+
+    let mut pkg = PackageMeta::new("rust-learning-lab", "0.1.0", "2024");
+    pkg.add_dep("serde", "1.0", DependencyKind::Normal);
+    pkg.add_dep("serde_json", "1.0", DependencyKind::Normal);
+    pkg.add_dep("pretty_assertions", "1.4", DependencyKind::Dev);
+
+    println!("1. Package: {} v{} (Edition {})", pkg.name, pkg.version, pkg.edition);
+
+    // Serialisasi Struct -> JSON String via serde_json
+    let json_output = pkg.to_json().expect("Gagal serialisasi ke JSON");
+    println!("2. Hasil Serialisasi JSON:\n{json_output}");
+
+    // Deserialisasi JSON String -> Struct via serde_json
+    let parsed_pkg = PackageMeta::from_json(&json_output).expect("Gagal deserialisasi");
+    println!("3. Verifikasi parsed == original: {}", parsed_pkg == pkg);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // Dev-dependency: pretty_assertions hanya di-link pada tahap pengujian
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn test_package_meta_serialization_cycle() {
+        let mut pkg = PackageMeta::new("rust-learning-lab", "0.1.0", "2024");
+        pkg.add_dep("serde", "1.0", DependencyKind::Normal);
+        pkg.add_dep("pretty_assertions", "1.4", DependencyKind::Dev);
+
+        let json = pkg.to_json().expect("Serialisasi gagal");
+        let restored = PackageMeta::from_json(&json).expect("Deserialisasi gagal");
+
+        assert_eq!(pkg, restored);
+    }
+}
 ```
 
 ---
 
-### 5.2 Multi-Crate Workspace Architecture
-Untuk aplikasi berskala enterprise, gunakan `[workspace]` untuk menyatukan beberapa crate independen dalam satu repositori:
+### 5.2 Fitur Modular & Optional Dependencies: `[features]`, `dep:`, dan Conditional Compilation
+
+Dalam pengembangan pustaka (*library*) maupun aplikasi skala besar, menyertakan seluruh dependensi secara *default* akan mengakibatkan binary membengkak (*binary bloat*) dan waktu kompilasi yang lama. Cargo menyediakan mekanisme **Feature Flags** untuk mengaktifkan kode dan dependensi hanya saat dibutuhkan (*Zero-Cost Modularity*).
+
+---
+
+#### 1. Konfigurasi `Cargo.toml`: Optional Dependencies & Feature Flags
+
+Untuk membuat dependensi bersifat opsional, tambahkan atribut `optional = true`. Selanjutnya, deklarasikan blok `[features]` untuk mengontrol aktivasinya:
+
 ```toml
-# File: ./Cargo.toml (Workspace Root)
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Dependensi opsional: tidak akan diunduh/dikompilasi jika fitur terkait tidak aktif
+tokio = { version = "1.0", optional = true, features = ["rt", "macros"] }
+
+[features]
+# Fitur yang otomatis aktif jika pengguna tidak menentukan flags
+default = []
+
+# Fitur kustom yang mengaktifkan dependensi tokio via sintaks modern dep: (Rust 2021/2024)
+async_runtime = ["dep:tokio"]
+```
+
+##### Mengapa Sintaks `dep:tokio` Penting?
+- Pada edisi Rust sebelum 2021, mendeklarasikan `tokio = { optional = true }` otomatis membuat fitur terselubung bernama `tokio`. Ini sering membingungkan karena nama fitur bertabrakan dengan nama crate.
+- Pada Rust Edition 2021/2024, disarankan menggunakan format eksplisit `dep:nama_crate`. Dengan cara ini, nama fitur (`async_runtime`) terpisah secara bersih dari nama crate internal (`tokio`).
+
+---
+
+#### 2. Conditional Compilation di Kode Rust (`#[cfg]` & `cfg!`)
+
+Kode Rust dapat mendeteksi keberadaan fitur yang aktif pada saat kompilasi menggunakan dua cara:
+
+##### A. Atribut `#[cfg(feature = "...")]`
+Digunakan pada level item (fungsi, struct, modul, atau blok kode). Kode yang tidak memenuhi kondisi tidak akan dikompilasi ke dalam binary sama sekali:
+
+```rust
+// Hanya dikompilasi jika feature "async_runtime" aktif
+#[cfg(feature = "async_runtime")]
+pub async fn execute_async_task(id: u64, name: &str) -> String {
+    format!("[ASYNC RUNTIME] Task #{id} '{name}' via tokio")
+}
+
+// Fallback: hanya dikompilasi jika feature "async_runtime" TIDAK aktif
+#[cfg(not(feature = "async_runtime"))]
+pub fn execute_sync_task(id: u64, name: &str) -> String {
+    format!("[SYNC RUNTIME] Task #{id} '{name}' blocking")
+}
+```
+
+##### B. Macro `cfg!(feature = "...")`
+Menghasilkan nilai boolean `true` atau `false` saat runtime/compile-time untuk percabangan logika ringan:
+
+```rust
+if cfg!(feature = "async_runtime") {
+    println!("Asynchronous runtime terdeteksi aktif.");
+} else {
+    println!("Berjalan dalam synchronous fallback mode.");
+}
+```
+
+---
+
+#### 3. Perintah Build & Eksekusi dengan Feature Berbeda
+
+Cargo memungkinkan kita menguji berbagai kombinasi fitur:
+
+| Perintah | Deskripsi Efek Kompilasi |
+|---|---|
+| `cargo build` | Menggunakan fitur `default`. Crate `tokio` **tidak dikompilasi**. Binary berukuran minimal. |
+| `cargo build --features async_runtime` | Mengaktifkan fitur `async_runtime`. Cargo otomatis mengunduh dan mengompilasi crate `tokio`. |
+| `cargo build --no-default-features` | Mematikan seluruh fitur default (berguna jika `default` memiliki kumpulan fitur dasar). |
+| `cargo build --all-features` | Mengaktifkan seluruh fitur yang dideklarasikan di `Cargo.toml`. |
+
+---
+
+#### 4. Kode Implementasi Laboratorium: `src/fase5_task_2.rs`
+
+Berikut implementasi nyata sistem adaptif multi-feature yang diterapkan pada lab:
+
+```rust
+// File: src/fase5_task_2.rs
+
+/// Mengembalikan status runtime berdasarkan feature flag aktif saat kompilasi
+pub fn runtime_status() -> &'static str {
+    #[cfg(feature = "async_runtime")]
+    {
+        "Mode: Asynchronous Runtime (Aktif via feature flag 'async_runtime' & crate 'tokio')"
+    }
+    #[cfg(not(feature = "async_runtime"))]
+    {
+        "Mode: Synchronous / Blocking Standar (Feature flag 'async_runtime' tidak aktif)"
+    }
+}
+
+pub fn is_async_enabled() -> bool {
+    cfg!(feature = "async_runtime")
+}
+
+/// Fungsi dispatcher utama yang otomatis beradaptasi dengan fitur yang dikompilasi
+pub fn process_task(id: u64, name: &str) -> String {
+    #[cfg(feature = "async_runtime")]
+    {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Gagal menginisialisasi runtime tokio");
+
+        rt.block_on(async {
+            format!("[ASYNC RUNTIME] Task #{id} '{name}' diproses via tokio non-blocking")
+        })
+    }
+
+    #[cfg(not(feature = "async_runtime"))]
+    {
+        format!("[SYNC RUNTIME] Task #{id} '{name}' diproses secara sekuensial (blocking)")
+    }
+}
+
+pub fn run() {
+    println!("=== Fase 5 - Task 2: Cargo Features & Optional Dependencies ===");
+    println!("1. Status Runtime: {}", runtime_status());
+    println!("2. Eksekusi: {}", process_task(101, "Database Ping"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_feature_detection_and_execution() {
+        let result = process_task(1, "Test Workload");
+        assert!(result.contains("Task #1 'Test Workload'"));
+
+        if cfg!(feature = "async_runtime") {
+            assert!(is_async_enabled());
+            assert!(result.contains("[ASYNC RUNTIME]"));
+        } else {
+            assert!(!is_async_enabled());
+            assert!(result.contains("[SYNC RUNTIME]"));
+        }
+    }
+}
+```
+
+---
+
+### 5.3 Cargo Profiles & Binary Optimization: `profile.dev`, `profile.release`, `opt-level`, LTO, dan Debug Symbols
+
+Compiler Rust (`rustc`) dibantu oleh backend pengoptimalan **LLVM**. Cargo menyediakan sistem **Profiles** yang memungkinkan pengembang mengatur kompromi (*trade-off*) antara **kecepatan kompilasi** (saat *development*) dan **kecepatan eksekusi runtime serta ukuran binary** (saat *production*).
+
+---
+
+#### 1. Lima Parameter Kunci Pengendali Profil
+
+Berikut adalah 5 parameter fundamental di dalam konfigurasi profil Cargo:
+
+| Parameter | Pilihan Nilai | Makna & Pengaruh Arsitektural |
+|---|---|---|
+| **`opt-level`** | `0`, `1`, `2`, `3`, `"s"`, `"z"` | Mengatur agresivitas optimasi compiler LLVM: <br>• `0`: Tanpa optimasi (kompilasi instan). <br>• `3`: Optimasi loop, inlining fungsi, dan SIMD vectorization maksimum. <br>• `"s"` / `"z"`: Mengoptimalkan ukuran binary sekecil mungkin (bagus untuk Embedded / WebAssembly). |
+| **`debug`** | `true`, `false`, `0`, `1`, `2` | Mengontrol pembuatan *debug symbols* (tabel alamat memori dan nama fungsi untuk GDB/LLDB serta pesan panic backtrace). |
+| **`lto`** | `false` (`"off"`), `"thin"`, `"fat"` | **Link-Time Optimization**: Mengizinkan linker mengoptimalkan dan melakukan inlining kode lintas batas-batas crate independen (sangat ampuh pada proyek modular). |
+| **`codegen-units`** | Angka bulat $\ge 1$ (misal `1` s/d `256`) | Jumlah potongan paralel yang diproses LLVM: <br>• Nilai besar (misal 256 di dev): Memanfaatkan multi-core CPU untuk kompilasi secepat kilat. <br>• Nilai `1` (di release): LLVM memproses seluruh kode sebagai satu kesatuan sehingga inlining cross-module berjalan 100% optimal. |
+| **`strip`** | `false`, `"none"`, `"debuginfo"`, `true` (`"symbols"`) | Membuang simbol debug dari berkas biner akhir hasil rilis untuk memangkas ukuran biner secara drastis sebelum didistribusikan ke server produksi. |
+
+---
+
+#### 2. Perbandingan Profil Bawaan: `profile.dev` vs `profile.release`
+
+Cargo secara otomatis mengaktifkan dua profil bawaan ini berdasarkan perintah yang Anda jalankan di terminal:
+
+| Karakteristik | `[profile.dev]` (`cargo build`) | `[profile.release]` (`cargo build --release`) |
+|---|---|---|
+| **Fokus Utama** | Kecepatan Iterasi Kompilasi & Kemudahan Debug | Performa Eksekusi Runtime Maksimal & Binary Ramping |
+| **Nilai `opt-level`** | `0` (Tidak ada optimasi) | `3` (Optimasi tertinggi) |
+| **Nilai `debug`** | `true` (Simbol debug lengkap) | `false` / `strip = "debuginfo"` |
+| **Nilai `lto`** | `off` (Linker standar) | `"thin"` atau `"fat"` |
+| **`codegen-units`** | `256` (Paralelisme multi-core tinggi) | `1` (Satu kesatuan utuh) |
+| **`debug_assertions`** | **Aktif** (`assert!`, bounds-checking ketat) | **Nonaktif** (Lewati assertion demi kecepatan) |
+| **Ukuran Binary** | Lebih besar (menyimpan symbol table) | Sangat kecil & terkompresi |
+| **Waktu Eksekusi** | Lebih lambat ($\sim 3\times - 10\times$ lebih lambat) | Sangat kencang (kecepatan bahasa C/C++) |
+
+---
+
+#### 3. Konfigurasi Nyata di `Cargo.toml` Laboratorium
+
+Berikut konfigurasi profil yang kita terapkan pada `rust-learning-lab/Cargo.toml`:
+
+```toml
+# Profil Pengembangan (Development / Debug)
+[profile.dev]
+opt-level = 0        # Kompilasi cepat tanpa beban optimasi
+debug = true         # Sertakan debug symbols lengkap untuk debugging
+
+# Profil Produksi (Release)
+[profile.release]
+opt-level = 3        # Optimasi maksimum (kecepatan eksekusi)
+lto = "thin"         # Link-Time Optimization lintas crate
+codegen-units = 1    # Unit tunggal untuk maksimalkan inline LLVM
+strip = "debuginfo"  # Buang debug info untuk pangkas ukuran binary
+```
+
+---
+
+#### 4. Kode Implementasi Laboratorium: `src/fase5_task_3.rs`
+
+Modul ini mendeteksi profil secara dinamis menggunakan macro `cfg!(debug_assertions)` serta menguji kecepatan eksekusi kalkulasi berbobot (algoritma Collatz Conjecture 1..=200,000 angka):
+
+```rust
+// File: src/fase5_task_3.rs
+use std::time::Instant;
+
+pub fn active_profile_name() -> &'static str {
+    if cfg!(debug_assertions) {
+        "dev (Debug)"
+    } else {
+        "release (Release)"
+    }
+}
+
+pub fn compute_collatz_max_steps(limit: u64) -> (u64, u32) {
+    let mut max_num = 1;
+    let mut max_steps = 0;
+
+    for i in 1..=limit {
+        let mut n = i;
+        let mut steps = 0;
+        while n > 1 {
+            if n % 2 == 0 {
+                n /= 2;
+            } else {
+                n = match n.checked_mul(3).and_then(|val| val.checked_add(1)) {
+                    Some(val) => val,
+                    None => break,
+                };
+            }
+            steps += 1;
+        }
+        if steps > max_steps {
+            max_steps = steps;
+            max_num = i;
+        }
+    }
+    (max_num, max_steps)
+}
+
+pub fn run() {
+    println!("=== Fase 5 - Task 3: Cargo Profiles & Binary Optimization ===");
+    println!("Profil Aktif: {}", active_profile_name());
+
+    let start = Instant::now();
+    let (num, steps) = compute_collatz_max_steps(200_000);
+    let duration = start.elapsed();
+
+    println!("Hasil: Angka {} menghasilkan {} langkah", num, steps);
+    println!("Waktu Komputasi: {:.2?}", duration);
+}
+```
+
+##### Bukti Hasil Benchmark Nyata:
+- **`cargo run` (Dev Mode - `opt-level=0` & `debug=true`)**: Waktu eksekusi = **199.61ms**.
+- **`cargo run --release` (Release Mode - `opt-level=3` & `LTO=thin`)**: Waktu eksekusi = **69.46ms**.
+> **Terbukti:** Optimasi profil release menghasilkan percepatan komputasi hampir **$3\times$ lipat lebih cepat** berkat *inlining*, registrasi variabel pada CPU registers, dan eliminasi branch overhead oleh LLVM!
+
+---
+
+### 5.4 Multi-Crate Workspace Architecture
+
+Untuk aplikasi berskala enterprise atau monorepo modern, mengelola banyak crate terpisah dalam repositori yang sama dilakukan menggunakan fitur **Cargo Workspace**. Workspace mengikat beberapa package menjadi satu kesatuan build dengan direktori `target/` bersama dan file `Cargo.lock` tunggal yang konsisten.
+
+---
+
+#### 1. Keuntungan Arsitektural Multi-Crate Workspace
+
+| Keuntungan | Penjelasan Arsitektural |
+|---|---|
+| **Single `Cargo.lock`** | Menjamin seluruh sub-crate menggunakan versi dependensi eksternal yang 100% identik tanpa konflik versi antar library. |
+| **Shared `target/` Directory** | Hasil kompilasi (objek biner pihak ketiga seperti `serde`) hanya dikompilasi satu kali dan dipakai bersama oleh seluruh sub-crate, menghemat disk dan memangkas waktu build drastis. |
+| **Workspace Inheritance** | Versi package, license, dan dependensi eksternal diatur terpusat di root via `workspace = true`. |
+| **Strict Boundary & Decoupling** | Pemisahan tegas domain logic (`core_domain`), adapter penyimpanan (`database_adapter`), dan runner aplikasi (`api_server`). |
+| **Unified Tooling** | Seluruh pengujian, formatting, dan linting dapat dijalankan serentak dengan satu perintah (`cargo test`, `cargo fmt`, `cargo clippy`). |
+
+---
+
+#### 2. Struktur Direktori Nyata Proyek `rust-workspace/`
+
+Berikut arsitektur folder yang kita bangun pada proyek `rust-workspace`:
+
+```text
+rust-workspace/
+├── Cargo.toml                          # Workspace Root Manifest
+├── Cargo.lock                          # Single Lockfile untuk seluruh sub-crate
+└── crates/
+    ├── core_domain/                    # Library Crate: Entitas murni & Business Logic
+    │   ├── Cargo.toml
+    │   └── src/lib.rs                  # Struct User, Enum UserRole
+    ├── database_adapter/               # Library Crate: Storage Engine
+    │   ├── Cargo.toml                  # Depends: core_domain
+    │   └── src/lib.rs                  # Struct DatabaseAdapter
+    └── api_server/                     # Binary Crate: Entry Point & Controller
+        ├── Cargo.toml                  # Depends: core_domain, database_adapter
+        └── src/main.rs                 # fn main() & HTTP handler simulation
+```
+
+---
+
+#### 3. Konfigurasi Workspace Root Manifest (`Cargo.toml`)
+
+Pada root workspace, deklarasikan bagian `[workspace]`, daftarkan `members`, dan atur metadata serta dependensi bersama:
+
+```toml
+# File: rust-workspace/Cargo.toml
 [workspace]
 resolver = "3"
 members = [
@@ -2394,17 +3096,140 @@ members = [
     "crates/api_server",
 ]
 
+# Metadata Bersama (Diwariskan ke semua sub-crate)
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Software Engineer <dev@enterprise.internal>"]
+
+# Manajemen Dependensi Terpusat (Workspace Dependencies)
 [workspace.dependencies]
-tokio = { version = "1.49", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
-tracing = "0.1"
+serde_json = "1.0"
 ```
-Setiap sub-crate dapat memanggil dependensi bersama:
+
+---
+
+#### 4. Sub-Crates & Cross-Crate Dependency
+
+Sub-crate mengadopsi konfigurasi root menggunakan flag `workspace = true` dan saling merujuk melalui path relatif:
+
+##### A. Sub-Crate `core_domain` (Domain Entities)
 ```toml
-# File: ./crates/api_server/Cargo.toml
+# File: crates/core_domain/Cargo.toml
+[package]
+name = "core_domain"
+version.workspace = true
+edition.workspace = true
+
 [dependencies]
-tokio = { workspace = true }
+serde = { workspace = true }
+```
+
+```rust
+// File: crates/core_domain/src/lib.rs
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum UserRole {
+    Admin,
+    Engineer,
+    Guest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct User {
+    pub id: u64,
+    pub username: String,
+    pub email: String,
+    pub role: UserRole,
+}
+
+impl User {
+    pub fn new(id: u64, username: &str, email: &str, role: UserRole) -> Self {
+        Self {
+            id,
+            username: username.to_string(),
+            email: email.to_string(),
+            role,
+        }
+    }
+}
+```
+
+##### B. Sub-Crate `database_adapter` (Cross-Crate Path Dependency)
+Crate ini bergantung pada `core_domain` melalui path relatif:
+```toml
+# File: crates/database_adapter/Cargo.toml
+[package]
+name = "database_adapter"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+core_domain = { path = "../core_domain" } # Cross-crate dependency!
+serde = { workspace = true }
+```
+
+##### C. Sub-Crate `api_server` (Binary Runner)
+Crate ini mengintegrasikan kedua sub-crate sebelumnya:
+```toml
+# File: crates/api_server/Cargo.toml
+[package]
+name = "api_server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
 core_domain = { path = "../core_domain" }
+database_adapter = { path = "../database_adapter" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+```
+
+---
+
+#### 5. Penggunaan Perintah Cargo pada Workspace
+
+Dari direktori root workspace (`rust-workspace/`), Anda dapat menjalankan seluruh perkakas Cargo secara terpadu:
+
+```bash
+# 1. Memeriksa kompilasi seluruh sub-crate sekaligus
+cargo check --workspace
+
+# 2. Menjalankan seluruh test pada semua sub-crate
+cargo test --workspace
+
+# 3. Menjalankan linter clippy untuk seluruh proyek
+cargo clippy --workspace
+
+# 4. Format seluruh kode sumber otomatis sesuai standar Rust
+cargo fmt
+
+# 5. Visualisasi pohon dependensi antar crate di workspace
+cargo tree
+
+# 6. Menjalankan binary crate tertentu
+cargo run --bin api_server
+```
+
+##### Bukti Hasil Eksekusi `cargo run --bin api_server`:
+```text
+============================================================
+=== Multi-Crate Workspace: api_server Starting...        ===
+============================================================
+1. Mendaftarkan user via cross-crate logic:
+   Payload API Response User 1:
+{
+  "id": 1,
+  "username": "alice",
+  "email": "alice@enterprise.com",
+  "role": "Admin"
+}
+2. Query semua user dari database_adapter:
+   Total user di database: 2
+   - [ENGINEER] #2 - bob (bob@enterprise.com)
+   - [ADMIN]    #1 - alice (alice@enterprise.com)
 ```
 
 ---

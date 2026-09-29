@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core_domain",
+    "crates/database_adapter",
+    "crates/api_server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Software Engineer <dev@enterprise.internal>"]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

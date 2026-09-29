@@ -1,0 +1,11 @@
+[package]
+name = "api_server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+core_domain = { path = "../core_domain" }
+database_adapter = { path = "../database_adapter" }
+serde = { workspace = true }
+serde_json = { workspace = true }
