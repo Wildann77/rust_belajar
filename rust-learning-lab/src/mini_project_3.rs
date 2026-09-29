@@ -68,6 +68,12 @@ impl TaskStatus {
 
 // ==========================================
 // 2. Struct Task (Domain Model)
+// Sesuai spesifikasi hirarki:
+// Task
+// ├── id
+// ├── title
+// ├── priority
+// └── status
 // ==========================================
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
@@ -176,7 +182,7 @@ pub fn drain_task_pipeline(pipeline: &mut Vec<Task>) -> Vec<String> {
 // ==========================================
 // Runner Function
 // ==========================================
-pub fn run() {
+pub fn run() {                      
     println!("=== Mini Project Fase 3: Task Domain Model ===");
 
     // 1. Constructor Demo

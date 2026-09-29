@@ -185,7 +185,7 @@ pub fn run() {
     println!("   Moderator: {}", classify_role(&UserRole::Moderator));
     println!("   Member 5 : {}", classify_role(&UserRole::Member(5)));
     println!("   Member 85: {}", classify_role(&UserRole::Member(85)));
-    println!("   Guest   : {}", classify_role(&UserRole::Guest));
+    println!("   Guest    : {}", classify_role(&UserRole::Guest));
 
     // 3. Range Pattern
     println!("3. Hasil classify_grade:");
