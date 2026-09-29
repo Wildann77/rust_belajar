@@ -3238,171 +3238,2816 @@ cargo run --bin api_server
 
 ## FASE 6: Robust Error Handling & Collections
 
-Rust menolak konsep `null` pointer dan perkecualian runtime tak tertangani (*unhandled exceptions*). Rust mengadopsi penanganan eksplisit via enum `Option<T>` dan `Result<T, E>`.
+Rust secara fundamental menolak konsep `null` pointer dan perkecualian runtime tak tertangani (*unhandled runtime exceptions*). Masalah null pointer—yang oleh penemunya, Sir Tony Hoare, disebut sebagai *"The Billion-Dollar Mistake"*—dieliminasi total pada tingkat kompilasi. 
 
-### 6.1 Operator `?` & Error Combinators
-Operator `?` mengekstrak nilai jika `Ok(T)`, atau langsung mengembalikan `Err(E)` keluar dari fungsi jika gagal.
+Rust menggantinya dengan pendekatan penanganan eksplisit berbasis sistem tipe aljabar (*algebraic data types*), yaitu enum `Option<T>` untuk ketiadaan nilai dan `Result<T, E>` untuk kemungkinan kegagalan operasi.
+
+---
+
+### 6.1 Fondasi Robust Error Handling: Enum `Option<T>` (Eliminasi Null)
+
+Dalam bahasa tradisional seperti C/C++, Java, atau JavaScript, sebuah variabel referensi bisa bernilai `null` / `undefined`. Jika programmer lupa memeriksa kondisi null sebelum mengakses properti atau memanggil metode, program akan mengalami crash fatal (`NullPointerException`, `Segmentation fault`, dsb).
+
+Rust tidak memiliki `null`. Sebagai gantinya, pustaka standar Rust (`std`) mendefinisikan enum `Option<T>` yang diimpor otomatis ke dalam *prelude*:
 
 ```rust
-use std::fs::File;
-use std::io::{self, Read};
-
-// Operator ? melakukan return dini otomatis jika terjadi error
-fn read_username_from_file(path: &str) -> Result<String, io::Error> {
-    let mut s = String::new();
-    File::open(path)?.read_to_string(&mut s)?;
-    Ok(s.trim().to_string())
+pub enum Option<T> {
+    None,
+    Some(T),
 }
+```
 
-// Combinators: map, and_then, unwrap_or_else
-fn combinator_demo() {
-    let raw_input: Option<&str> = Some("42");
+- **`None`**: Mengindikasikan ketiadaan nilai (mirip konsep null, namun bertipe eksplisit aman).
+- **`Some(T)`**: Membungkus nilai konkret bertipe `T`.
 
-    // Mengubah Option<&str> -> Option<i32> secara fungsional
-    let parsed: Option<i32> = raw_input
-        .and_then(|s| s.parse::<i32>().ok())
-        .map(|n| n * 2);
+Karena `Option<T>` dan `T` adalah tipe yang berbeda, compiler **tidak akan pernah mengizinkan** Anda memperlakukan `Option<T>` seolah-olah itu adalah `T`. Anda diwajibkan secara eksplisit memeriksa dan membuka bungkus (*unwrap*) nilai tersebut.
 
-    let final_val = parsed.unwrap_or(0);
-    println!("Parsed: {}", final_val);
+---
+
+#### 1. Cara Ekstraksi Nilai: `match` vs `if let`
+
+##### A. Exhaustive Pattern Matching (`match`)
+Pola paling fundamental dan ketat di Rust. Compiler menjamin bahwa kedua cabang (`Some` dan `None`) wajib ditangani. Jika ada cabang yang terlewat, kode gagal dikompilasi.
+
+```rust
+let user_opt = repo.find_by_id(1);
+
+let greeting = match user_opt {
+    Some(user) => format!("Halo, {}! (ID: {})", user.username, user.id),
+    None => "User tidak ditemukan dalam sistem!".to_string(),
+};
+```
+
+##### B. Concise Branching (`if let`)
+Jika Anda hanya tertarik pada kasus `Some` dan ingin mengabaikan kasus `None` tanpa keharusan menulis boilerplate cabang kosong, gunakan sintaks ergonomis `if let`:
+
+```rust
+if let Some(ref email) = user.email {
+    println!("Email terdaftar: {}", email);
+} else {
+    println!("Email belum didaftarkan");
 }
 ```
 
 ---
 
-### 6.2 Custom Error Types dengan `thiserror` Pattern
-Di backend profesional, buat custom enum error yang mendeskripsikan seluruh kemungkinan kegagalan domain:
+#### 2. Functional Combinators: `.map()` vs `.and_then()`
+
+Alih-alih selalu menggunakan `match` yang panjang untuk operasi sederhana, Rust menyediakan metode combinator fungsional tingkat tinggi:
+
+##### A. Transformasi Elemen: `.map()`
+Digunakan untuk mentransformasikan nilai di dalam `Some(T)` menjadi `Option<U>` menggunakan fungsi atau closure `FnOnce(T) -> U`. Jika nilainya `None`, closure tidak akan dieksekusi dan hasilnya tetap `None`.
+
 ```rust
-#[derive(Debug)]
-pub enum AppError {
-    NotFound(String),
-    InvalidInput(String),
-    DatabaseFailure(String),
+// Mengubah Option<String> -> Option<String> (uppercase) tanpa bongkar manual
+let uppercase_email = user.email.as_ref().map(|e| e.to_uppercase());
+```
+
+##### B. Chaining & Flattening: `.and_then()` (Monadic Bind / Flat Map)
+Ketika operasi pemetaan itu sendiri mengembalikan `Option` lain (`FnOnce(T) -> Option<U>`), pemanggilan `.map()` biasa akan menghasilkan struktur bersarang (*nested*) `Option<Option<U>>`.
+
+`.and_then()` secara otomatis meratakan (*flatten*) hirarki tersebut sehingga tetap menghasilkan `Option<U>` tunggal. Sangat berguna untuk pengecekan berantai (*chain of lookups*):
+
+```rust
+// Mencari kode pos user yang berada di dalam field opsional bertingkat:
+// user_opt: Option<&UserProfile> -> address: Option<Address> -> postal_code: Option<String>
+let postal_code = user_opt
+    .and_then(|u| u.address.as_ref())
+    .and_then(|addr| addr.postal_code.clone());
+```
+
+---
+
+#### 3. Defensive Fallback: Nilai Cadangan via `.unwrap_or()`
+
+Seringkali pemula tergoda memanggil `.unwrap()`. Namun, memanggil `.unwrap()` pada varian `None` akan langsung memicu **fatal panic** dan mematikan thread program!
+
+Untuk kode produksi yang andal (*robust*), selalu sediakan nilai cadangan aman (*safe fallback*) menggunakan `.unwrap_or()` atau `.unwrap_or_else()`:
+
+```rust
+// Aman: jika email None, gunakan fallback default tanpa risiko crash fatal
+let display_email = user.email.as_deref().unwrap_or("guest@system.local");
+```
+
+---
+
+#### 4. Bedah Arsitektural Macro `#[derive(...)]` pada Struct Domain
+
+Mengapa struct domain seperti `Address` dan `UserProfile` selalu diawali dengan `#[derive(Debug, Clone, PartialEq, Eq)]`? Mengapa sintaks ini sangat sering muncul di berbagai kode Rust?
+
+##### A. Masalah: Struct Baru adalah "Benda Asing" bagi Compiler
+Rust menolak paradigma *inheritance* (pewarisan kelas) OOP. Semua fungsionalitas dan perilaku objek dimodelkan secara modular melalui **Trait**. 
+
+Secara default, saat Anda membuat struct baru:
+1. Rust **tidak tahu cara mencetak** isinya ke terminal via `println!("{:?}", user)` $\rightarrow$ memerlukan implementasi trait `std::fmt::Debug`.
+2. Rust **tidak tahu cara menduplikasi** data via `.clone()` $\rightarrow$ memerlukan implementasi trait `Clone`.
+3. Rust **tidak tahu cara membandingkan** kesamaan nilai via operator `==` atau makro `assert_eq!` $\rightarrow$ memerlukan implementasi trait `PartialEq`.
+
+##### B. Tanpa `derive`: Boilerplate Manual yang Repetitif & Melelahkan
+Jika Rust tidak menyediakan jalan pintas, programmer terpaksa menulis implementasi trait manual yang panjang untuk setiap struct:
+```rust
+// Tanpa derive: harus tulis manual hanya untuk bisa di-print {:?}
+impl std::fmt::Debug for UserProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserProfile")
+            .field("id", &self.id)
+            .field("username", &self.username)
+            .finish()
+    }
 }
 
-impl std::fmt::Display for AppError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+// Tanpa derive: harus tulis manual hanya agar bisa dibandingkan pakai ==
+impl PartialEq for UserProfile {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.username == other.username
+    }
+}
+```
+
+##### C. Solusi Modern: `#[derive(...)]` (Compile-Time Code Generation)
+Macro atribut `#[derive(...)]` memerintahkan compiler Rust untuk **secara otomatis meng-generate seluruh kode boilerplate di atas saat proses kompilasi**. Proses ini terjadi di tahap kompilasi (*compile-time*) sehingga memiliki sifat **Zero-Cost Abstraction** (tanpa overhead runtime).
+
+Tabel fungsi trait umum di dalam `#[derive(...)]`:
+| Trait di `derive` | Peran & Kemampuan | Contoh Pemanggilan Nyata |
+| :--- | :--- | :--- |
+| **`Debug`** | Mengizinkan format cetak inspeksi debugging (`{:?}` / `{:#?}`). | `println!("{:?}", user);` atau `dbg!(user);` |
+| **`Clone`** | Mengizinkan duplikasi nilai struct secara eksplisit ke alokasi memori baru. | `let user_copy = user.clone();` |
+| **`PartialEq`** | Mengizinkan komparasi kesamaan antar-instance via operator `==` dan `!=`. | `if u1 == u2` atau `assert_eq!(u1, u2);` di unit test |
+| **`Eq`** | Menegaskan relasi kesetaraan mutlak (*equivalence relation*, di mana `a == a` selalu `true`). | Syarat wajib sebagai key di `HashMap` atau `HashSet` |
+| **`Default`** | Menyediakan nilai default standar saat instansiasi tanpa parameter. | `let u = UserProfile::default();` |
+| **`Copy`** | Duplikasi implisit bit-by-bit di stack (khusus struct yang seluruh field-nya tipe primitif kecil tanpa alokasi heap). | Assignment `let b = a;` tanpa memindahkan kepemilikan (*move ownership*) |
+
+---
+
+#### 5. Kode Implementasi Terintegrasi (`src/fase6_task_1.rs`)
+
+Selaras dengan checklist target Fase 6 Task 1, berikut adalah implementasi domain nyata profil pengguna:
+
+```rust
+// Fase 6 - Task 1: Robust Error Handling — Option<T>
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Address {
+    pub city: String,
+    pub postal_code: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserProfile {
+    pub id: u64,
+    pub username: String,
+    pub email: Option<String>,
+    pub address: Option<Address>,
+}
+
+pub struct UserRepository {
+    users: Vec<UserProfile>,
+}
+
+impl UserRepository {
+    pub fn new() -> Self {
+        Self {
+            users: vec![
+                UserProfile {
+                    id: 1,
+                    username: "alice".to_string(),
+                    email: Some("alice@example.com".to_string()),
+                    address: Some(Address {
+                        city: "Jakarta".to_string(),
+                        postal_code: Some("10110".to_string()),
+                    }),
+                },
+                UserProfile {
+                    id: 2,
+                    username: "bob".to_string(),
+                    email: Some("bob@rustacean.org".to_string()),
+                    address: Some(Address {
+                        city: "Bandung".to_string(),
+                        postal_code: None,
+                    }),
+                },
+                UserProfile {
+                    id: 3,
+                    username: "charlie".to_string(),
+                    email: None,
+                    address: None,
+                },
+            ],
+        }
+    }
+
+    // 1 & 2. Demonstrasi Some dan None
+    pub fn find_by_id(&self, id: u64) -> Option<&UserProfile> {
+        self.users.iter().find(|u| u.id == id)
+    }
+}
+
+// 3. match exhaustive
+pub fn format_user_greeting(user_opt: Option<&UserProfile>) -> String {
+    match user_opt {
+        Some(user) => format!("Halo, {}! (ID: {})", user.username, user.id),
+        None => "User tidak ditemukan dalam sistem!".to_string(),
+    }
+}
+
+// 4. if let branching
+pub fn check_has_email(user: &UserProfile) -> String {
+    if let Some(ref email) = user.email {
+        format!("Email terdaftar: {}", email)
+    } else {
+        "Email belum didaftarkan".to_string()
+    }
+}
+
+// 5. map combinator
+pub fn get_uppercase_email(user: &UserProfile) -> Option<String> {
+    user.email.as_ref().map(|e| e.to_uppercase())
+}
+
+// 6. and_then chaining & flattening
+pub fn get_user_postal_code(user_opt: Option<&UserProfile>) -> Option<String> {
+    user_opt
+        .and_then(|u| u.address.as_ref())
+        .and_then(|addr| addr.postal_code.clone())
+}
+
+// 7. unwrap_or safe fallback
+pub fn get_email_or_default<'a>(user: &'a UserProfile, default_email: &'a str) -> &'a str {
+    user.email.as_deref().unwrap_or(default_email)
+}
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+=== Fase 6 - Task 1: Robust Error Handling — Option<T> ===
+Konsep Inti: Eliminasi null pointer exception via enum Option<T> (Some & None)
+
+1. Pembuatan & Pencarian via Option (Some & None):
+   - ID 1  : Some("alice")
+   - ID 99 : None
+
+2. Ekstraksi Exhaustive via `match`:
+   - match ID 1  -> Halo, alice! (ID: 1)
+   - match ID 99 -> User tidak ditemukan dalam sistem!
+
+3. Ekstraksi Ringkas via `if let`:
+   - Alice   -> Email terdaftar: alice@example.com
+   - Charlie -> Email belum didaftarkan
+
+4. Transformasi Nilai via `.map()`:
+   - Alice upper email -> Some("ALICE@EXAMPLE.COM")
+   - Charlie upper email -> None
+
+5. Rantai Pengecekan Bersarang via `.and_then()` (Flat Map):
+   - ID 1 (Lengkap)     postal_code: Some("10110")
+   - ID 2 (Tanpa Pos)   postal_code: None
+   - ID 3 (Tanpa Alamat)postal_code: None
+   - ID 99 (None User)  postal_code: None
+
+6. Fallback Aman via `.unwrap_or()` (Anti-Crash):
+   - Bob email     -> bob@rustacean.org
+   - Charlie email -> guest@system.local
+```
+
+---
+
+### 6.2 Eksekusi Terkendali via `Result<T, E>` & Operator `?` (Error Propagation)
+
+Di kebanyakan bahasa pemrograman (seperti Java, Python, JavaScript, atau C#), error ditangani melalui mekanisme *exceptions* (`try-catch-finally`). Namun, exception memiliki kelemahan mendasar:
+1. **Tidak Eksplisit**: Tanda tangan fungsi (*function signature*) seringkali menyembunyikan fakta bahwa fungsi tersebut bisa melempar error tak terduga (*hidden runtime crashes*).
+2. **Overhead Tinggi**: Pembuatan stack trace pada exception membebani alokasi CPU dan memori saat runtime.
+
+Rust menolak *exceptions* untuk error yang dapat dipulihkan (*recoverable errors*). Rust mewajibkan setiap operasi yang berpotensi gagal mengembalikan enum `Result<T, E>`.
+
+---
+
+#### 1. Struktur Internal Enum `Result<T, E>`
+
+Didefinisikan di dalam pustaka standar Rust (`std`) dan diimpor otomatis ke *prelude*:
+
+```rust
+pub enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+```
+
+- **`Ok(T)`**: Menunjukkan operasi sukses dan membungkus data hasil bertipe `T`.
+- **`Err(E)`**: Menunjukkan operasi gagal dan membungkus informasi/alasan kegagalan bertipe `E`.
+
+Karena bertipe aljabar tegas, compiler memaksa Anda menangani kemungkinan `Err` sebelum diizinkan menggunakan nilai `T`.
+
+---
+
+#### 2. Penanganan Manual: Exhaustive `match`
+
+Cara paling dasar untuk mengekstrak `Result` adalah dengan pattern matching `match`. Kedua cabang (`Ok` dan `Err`) wajib dicakup:
+
+```rust
+match parse_amount("1500.50") {
+    Ok(amount) => println!("Nominal valid: Rp{:.2}", amount),
+    Err(err_msg) => eprintln!("Error validasi: {}", err_msg),
+}
+```
+
+---
+
+#### 3. Operator `?` (The Try Operator) & Mekanisme Early-Return
+
+Menulis blok `match` berulang-ulang untuk setiap fungsi yang bisa gagal akan membuat kode menjadi sangat bertele-tele (*callback hell* atau tumpukan indentasi).
+
+Rust menyediakan sintaks ergonomis tingkat tinggi: **Operator `?`**.
+
+```rust
+let amount = parse_amount(amount_str)?;
+```
+
+##### Cara Kerja Operator `?`:
+1. Jika ekspresi bernilai `Ok(nilai)`, operator `?` **otomatis membuka bungkusnya** dan mengembalikan `nilai` tersebut ke variabel.
+2. Jika ekspresi bernilai `Err(error)`, operator `?` **seketika menghentikan eksekusi fungsi saat itu juga (*early-return*)** dan langsung mengembalikan `Err(error)` ke fungsi pemanggil (*caller*).
+
+> **Syarat Wajib**: Operator `?` hanya bisa digunakan di dalam fungsi yang tipe return-nya kompatibel (misalnya fungsi tersebut juga mengembalikan `Result<_, E>`).
+
+---
+
+#### 4. Konsep Error Propagation (Perambatan Error Terkendali)
+
+Error propagation adalah pola di mana error tidak langsung ditangani di tempat terjadinya, melainkan diteruskan ke tingkat yang lebih tinggi (*caller*) yang memiliki wewenang untuk mengambil keputusan (misal: menampilkan pesan ke user, mencatat audit log, atau mengembalikan HTTP status 400).
+
+Perhatikan alur perambatan pada pipeline transaksi:
+```text
+[Input Nominal]  ──> parse_amount()?    ──(Gagal)──> [Return Err Langsung]
+                          │ (Sukses)
+[Akun Bank]      ──> fetch_account()?   ──(Gagal)──> [Return Err Langsung]
+                          │ (Sukses)
+[Pemotongan]     ──> debit_account()?   ──(Gagal)──> [Return Err Langsung]
+                          │ (Sukses)
+                   [Return Ok(Receipt)]
+```
+
+Dengan operator `?`, seluruh alur validasi dan pengecekan di atas dapat ditulis bersih secara linear tanpa satupun blok `try-catch` bertumpuk.
+
+---
+
+#### 5. Kode Implementasi Terintegrasi (`src/fase6_task_2.rs`)
+
+Selaras dengan checklist target Fase 6 Task 2:
+
+```rust
+// Fase 6 - Task 2: Robust Error Handling — Result<T, E> & Operator ?
+#[derive(Debug, Clone, PartialEq)]
+pub struct BankAccount {
+    pub id: u64,
+    pub owner: String,
+    pub balance: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransactionReceipt {
+    pub transaction_id: &'static str,
+    pub account_id: u64,
+    pub amount: f64,
+    pub remaining_balance: f64,
+}
+
+// 1 & 2. Pembuatan Ok(T) dan Err(E)
+pub fn parse_amount(raw: &str) -> Result<f64, String> {
+    let trimmed = raw.trim();
+    let amount = match trimmed.parse::<f64>() {
+        Ok(val) => val,
+        Err(_) => return Err(format!("Nominal '{trimmed}' bukan format angka yang valid")),
+    };
+
+    if amount <= 0.0 {
+        Err("Nominal transaksi harus bernilai lebih dari 0".to_string())
+    } else {
+        Ok(amount)
+    }
+}
+
+pub fn fetch_account(id: u64) -> Result<BankAccount, String> {
+    match id {
+        101 => Ok(BankAccount { id: 101, owner: "Alice".to_string(), balance: 5000.0 }),
+        102 => Ok(BankAccount { id: 102, owner: "Bob".to_string(), balance: 250.0 }),
+        unknown_id => Err(format!("Akun dengan ID {unknown_id} tidak ditemukan")),
+    }
+}
+
+pub fn debit_account(account: &mut BankAccount, amount: f64) -> Result<f64, String> {
+    if account.balance < amount {
+        Err(format!("Saldo tidak mencukupi! Tersedia: Rp{:.2}, diminta: Rp{:.2}", account.balance, amount))
+    } else {
+        account.balance -= amount;
+        Ok(account.balance)
+    }
+}
+
+// 3. match exhaustive
+pub fn format_amount_inspection(raw: &str) -> String {
+    match parse_amount(raw) {
+        Ok(amount) => format!("[VALID] Nominal: Rp{:.2}", amount),
+        Err(err_msg) => format!("[GAGAL] Validasi gagal: {}", err_msg),
+    }
+}
+
+// 4 & 5. Operator ? dan Error Propagation
+pub fn process_payment(account_id: u64, amount_str: &str) -> Result<TransactionReceipt, String> {
+    let amount = parse_amount(amount_str)?;
+    let mut account = fetch_account(account_id)?;
+    let remaining = debit_account(&mut account, amount)?;
+
+    Ok(TransactionReceipt {
+        transaction_id: "TXN-2026-001",
+        account_id: account.id,
+        amount,
+        remaining_balance: remaining,
+    })
+}
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+=== Fase 6 - Task 2: Robust Error Handling — Result<T, E> & Operator ? ===
+Konsep Inti: Penanganan kemungkinan gagal secara eksplisit via Ok & Err serta operator ?
+
+1. Validasi Input via `match` (Ok vs Err):
+   - [VALID] Nominal: Rp1500.50
+   - [GAGAL] Validasi gagal: Nominal transaksi harus bernilai lebih dari 0
+   - [GAGAL] Validasi gagal: Nominal 'seribu_rupiah' bukan format angka yang valid
+
+2. Eksekusi Pipeline Pembayaran Sukses (Operator ?):
+   [✓] Transaksi Berhasil! ID: TXN-2026-001, Akun: 101, Debet: Rp1200.00, Sisa: Rp3800.00
+
+3. Propagasi Error Tahap 1: Format Nominal Tidak Valid:
+   [Propagated Err] Nominal 'abc' bukan format angka yang valid
+
+4. Propagasi Error Tahap 2: Akun Tidak Terdaftar:
+   [Propagated Err] Akun dengan ID 999 tidak ditemukan
+
+5. Propagasi Error Tahap 3: Saldo Akun Kurang:
+   [Propagated Err] Saldo tidak mencukupi! Tersedia: Rp250.00, diminta: Rp1000.00
+```
+
+---
+
+### 6.3 Custom Error Types: Anatomi, Trait Hierarchy, & Error Conversion
+
+Pada kode pemula atau prototipe, seringkali kita tergoda menggunakan string sebagai tipe error (misal `Result<T, String>`). Namun, di level sistem dan backend produksi enterprise, pola tersebut **dihindari** karena:
+1. **Tidak Type-Safe**: Caller tidak bisa menggunakan `match` untuk membedakan secara terstruktur apakah error disebabkan oleh *not found*, *invalid input*, atau *kegagalan koneksi*.
+2. **Tidak Terintegrasi**: Tipe string biasa tidak memenuhi kontrak `std::error::Error`, sehingga tidak bisa digunakan dengan ekosistem logging, tracing, dan middleware framework.
+
+Pendekatan idiomatik di Rust adalah mendefinisikan **Custom Enum Error**.
+
+---
+
+#### 1. Anatomi Enum `AppError`
+
+Enum mendeskripsikan secara exhaustive semua kemungkinan kegagalan yang dapat terjadi di domain aplikasi:
+
+```rust
+use std::io;
+
+#[derive(Debug)]
+pub enum AppError {
+    NotFound(String),      // Resource yang dicari tidak ada
+    InvalidInput(String),  // Validasi parameter gagal
+    Io(io::Error),         // Kegagalan I/O dari sistem operasi/file
+}
+```
+
+---
+
+#### 2. Tiga Trait Fondasi Standar Error
+
+Sebuah tipe kustom dianggap sebagai "Error Resmi" di Rust jika mengimplementasikan 3 trait berikut:
+
+| Trait | Peran & Konsumen | Cara Implementasi |
+| :--- | :--- | :--- |
+| **`std::fmt::Debug`** | Untuk keperluan logging internal pengembang (`tracing`, `log::error!`, atau format `{:?}`). | Cukup pasang `#[derive(Debug)]`. |
+| **`std::fmt::Display`** | Untuk pesan yang disajikan ke pengguna akhir (*user-facing*) atau response HTTP body. | Tulis manual via `impl fmt::Display for AppError`. |
+| **`std::error::Error`** | Kontrak standar pustaka Rust. Menyediakan metode `.source()` untuk menelusuri rantai akar penyebab error (*error causal chain*). | `impl std::error::Error for AppError`. |
+
+```rust
+// Implementasi Display
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AppError::NotFound(msg) => write!(f, "Data Tidak Ditemukan: {}", msg),
-            AppError::InvalidInput(msg) => write!(f, "Input Tidak Valid: {}", msg),
-            AppError::DatabaseFailure(msg) => write!(f, "Kesalahan Database: {}", msg),
+            AppError::NotFound(msg) => write!(f, "Data Tidak Ditemukan: {msg}"),
+            AppError::InvalidInput(msg) => write!(f, "Input Tidak Valid: {msg}"),
+            AppError::Io(err) => write!(f, "Kesalahan I/O Sistem: {err}"),
         }
     }
 }
 
-impl std::error::Error for AppError {}
+// Implementasi std::error::Error dengan causal chain (source)
+impl std::error::Error for AppError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            AppError::Io(err) => Some(err), // Io menyimpan error asli dari sistem operasi
+            _ => None,
+        }
+    }
+}
 ```
 
 ---
 
-### 6.3 Collections: Vector & HashMap Entry API
+#### 3. Konversi Error Otomatis via Trait `From<T>`
+
+Ketika fungsi kita memanggil fungsi pustaka standar yang menghasilkan tipe error berbeda (misal `std::io::Error`), operator `?` **tidak akan bisa bekerja** jika tipe error tersebut tidak kompatibel dengan return function kita.
+
+Rust menyelesaikan masalah ini secara elegan: **Operator `?` di belakang layar memanggil `From::from(err)`**.
+
+Dengan mengimplementasikan trait `From<io::Error>` untuk `AppError`:
 ```rust
+impl From<io::Error> for AppError {
+    fn from(err: io::Error) -> Self {
+        AppError::Io(err)
+    }
+}
+```
+Maka kode pembacaan file:
+```rust
+let content = std::fs::read_to_string(path)?;
+```
+Akan **secara otomatis dikonversi** dari `std::io::Error` menjadi `AppError::Io(...)` tanpa perlu konversi manual yang bertele-tele!
+
+---
+
+#### 4. Kode Implementasi Terintegrasi (`src/fase6_task_3.rs`)
+
+Selaras dengan checklist target Fase 6 Task 3:
+
+```rust
+// Fase 6 - Task 3: Robust Error Handling — Custom Error
+use std::fmt;
+use std::fs;
+use std::io;
+
+// 1. Custom Enum Error
+#[derive(Debug)]
+pub enum AppError {
+    NotFound(String),
+    InvalidInput(String),
+    Io(io::Error),
+}
+
+// 2. Trait Display
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AppError::NotFound(msg) => write!(f, "Data Tidak Ditemukan: {msg}"),
+            AppError::InvalidInput(msg) => write!(f, "Input Tidak Valid: {msg}"),
+            AppError::Io(err) => write!(f, "Kesalahan I/O Sistem: {err}"),
+        }
+    }
+}
+
+// 3. Trait std::error::Error & source chain
+impl std::error::Error for AppError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            AppError::Io(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+// 4. Konversi Error via From
+impl From<io::Error> for AppError {
+    fn from(err: io::Error) -> Self {
+        AppError::Io(err)
+    }
+}
+
+// 5. Propagation dengan ?
+pub fn validate_config_filename(filename: &str) -> Result<&str, AppError> {
+    let trimmed = filename.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::InvalidInput("Nama file konfigurasi tidak boleh kosong".to_string()));
+    }
+    if !trimmed.ends_with(".conf") && !trimmed.ends_with(".json") {
+        return Err(AppError::InvalidInput(format!(
+            "Ekstensi file '{trimmed}' tidak didukung (harus .conf atau .json)"
+        )));
+    }
+    Ok(trimmed)
+}
+
+pub fn read_config_entry(path: &str, target_key: &str) -> Result<String, AppError> {
+    let valid_path = validate_config_filename(path)?;
+    let content = fs::read_to_string(valid_path)?; // Otomatis terkonversi io::Error -> AppError
+
+    for line in content.lines() {
+        if let Some((k, v)) = line.split_once('=') {
+            if k.trim() == target_key {
+                return Ok(v.trim().to_string());
+            }
+        }
+    }
+
+    Err(AppError::NotFound(format!("Key '{target_key}' tidak ditemukan di '{valid_path}'")))
+}
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+=== Fase 6 - Task 3: Robust Error Handling — Custom Error ===
+Konsep Inti: Custom enum error dengan trait Debug, Display, Error, From, dan ?
+
+1. Kasus Sukses (Valid Input, Valid I/O, Key Ditemukan):
+   [✓] Nilai config ditemukan: database_url = postgres://localhost:5432/app
+
+2. Kasus Gagal 1: Validasi Input (AppError::InvalidInput):
+   - Display : Input Tidak Valid: Ekstensi file 'invalid_format.txt' tidak didukung (harus .conf atau .json)
+   - Debug   : InvalidInput("Ekstensi file 'invalid_format.txt' tidak didukung (harus .conf atau .json)")
+
+3. Kasus Gagal 2: I/O File Hilang (AppError::Io via `?` & `From`):
+   - Display : Kesalahan I/O Sistem: No such file or directory (os error 2)
+   - Debug   : Io(Os { code: 2, kind: NotFound, message: "No such file or directory" })
+   - Source  : No such file or directory (os error 2)
+
+4. Kasus Gagal 3: Key Tidak Ada (AppError::NotFound):
+   - Display : Data Tidak Ditemukan: Key 'secret_api_key' tidak ditemukan di '/tmp/app_fase6_test.conf'
+   - Debug   : NotFound("Key 'secret_api_key' tidak ditemukan di '/tmp/app_fase6_test.conf'")
+```
+
+---
+
+### 6.4 Collections Tingkat Lanjut: `Vec<T>` Internals & `HashMap` Entry API
+
+Koleksi data (*collections*) di Rust dialokasikan secara dinamis di memori heap. Memahami cara kerja memori dan API yang aman sangat penting untuk mencegah degradasi performa dan fatal panic di backend.
+
+---
+
+#### 1. `Vec<T>`: Anatomi Memori, Kapasitas, & Safe Access
+
+Sebuah `Vec<T>` di stack terdiri dari 3 kata mesin (*three words of memory*):
+1. **Pointer**: Alamat memori heap tempat elemen pertama disimpan.
+2. **Length (`len`)**: Jumlah elemen yang saat ini aktif di dalam vector.
+3. **Capacity (`capacity`)**: Jumlah alokasi ruang maksimum di heap sebelum vector dipaksa melakukan *re-alokasi*.
+
+```text
+Stack Buffer:
+[ Pointer (8B) ] ──> Heap Buffer: [ Item 1 | Item 2 | Item 3 | (Kosong) | (Kosong) ]
+[ Length: 3    ]                  |─────── len: 3 ──────────|
+[ Capacity: 5  ]                  |─────────────── capacity: 5 ────────────────────|
+```
+
+##### A. Optimasi Performa via `Vec::with_capacity(n)`
+Jika Anda membuat vector kosong biasa (`Vec::new()`) dan menambahkan 10.000 elemen via `.push()`, Rust akan melakukan re-alokasi berulang kali: mengalokasikan buffer baru 2x lebih besar, menyalin semua data lama, dan mendealokasikan buffer lama.
+
+Dengan `Vec::with_capacity(10_000)`, buffer heap dialokasikan **hanya 1 kali** di awal, menghemat siklus CPU dan mencegah fragmentasi memori.
+
+```rust
+let mut inventory = Vec::with_capacity(100);
+inventory.push(product);
+```
+
+##### B. Akses Index Aman: `.get(index)` vs `vec[index]`
+- `vec[index]`: Jika `index >= len`, program langsung mengalami **fatal panic (crash runtime)**.
+- `vec.get(index)`: Mengembalikan `Option<&T>` (`Some(&item)` jika ada, `None` jika di luar batas). Tidak akan pernah crash!
+
+```rust
+// Aman: mengembalikan None jika index 99 tidak ada
+let item = inventory.get(99); 
+```
+
+##### C. In-Place Filtering via `.retain(predicate)`
+Alih-alih membuat vector baru via `.filter().collect()`, metode `.retain()` menyaring elemen langsung di tempat (*in-place mutation*), mempertahankan urutan, dan membuang elemen yang tidak lolos tanpa satu pun alokasi heap baru:
+
+```rust
+// Membuang semua produk yang stoknya 0 secara in-place
+inventory.retain(|p| p.stock > 0);
+```
+
+---
+
+#### 2. `HashMap<K, V>` & Ergonomi Entry API
+
+`HashMap` bawaan Rust menggunakan algoritma **SipHash 1-3** untuk melindungi aplikasi web dari serangan *HashDoS* (Denial of Service via collision).
+
+##### Masalah Anti-Pattern: Double Hash Lookup
+Pemula dari bahasa lain sering menulis kode pencatatan frekuensi seperti ini:
+```rust
+// ❌ ANTI-PATTERN: Menghitung hash 2x untuk key yang sama
+if map.contains_key(&key) {
+    *map.get_mut(&key).unwrap() += 1; // Lookup ke-2
+} else {
+    map.insert(key, 1);               // Lookup ke-2
+}
+```
+
+##### Solusi Idiomatik: Entry API (Single Lookup / O(1))
+Entry API memungkinkan Anda menghitung hash **hanya satu kali**, lalu mengambil keputusan apakah key tersebut sudah ada (*Occupied*) atau belum (*Vacant*):
+
+- **`.entry(key)`**: Mengembalikan enum `Entry` yang menunjuk ke slot hash bucket.
+- **`.and_modify(|val| ...)`**: Menjalankan closure untuk memodifikasi nilai jika key sudah ada.
+- **`.or_insert(default)`**: Memasukkan nilai default jika key belum ada, lalu mengembalikan `&mut V`.
+
+```rust
+// ✅ IDIOMATIK: Single hash lookup
+map.entry(category)
+    .and_modify(|total_stock| *total_stock += stock)
+    .or_insert(stock);
+```
+
+---
+
+#### 3. Kode Implementasi Terintegrasi (`src/fase6_task_4.rs`)
+
+Selaras dengan checklist target Fase 6 Task 4:
+
+```rust
+// Fase 6 - Task 4: Collections — Vec<T> & HashMap Entry API
 use std::collections::HashMap;
 
-fn collections_deep_dive() {
-    // 1. Vector: alokasi kapasitas awal mencegah re-alokasi berulang
-    let mut vec = Vec::with_capacity(100);
-    vec.extend([10, 20, 30]);
-    vec.retain(|&x| x > 15); // Menyaring in-place: tersisa [20, 30]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Product {
+    pub id: u32,
+    pub name: String,
+    pub category: String,
+    pub stock: u32,
+    pub price: f64,
+}
 
-    // 2. HashMap dengan SipHash DoS Protection
-    let mut stats = HashMap::new();
-    let text = "apel jeruk apel semangka jeruk apel";
+// 1. Vec::with_capacity & push
+pub fn init_inventory_with_capacity(capacity: usize) -> Vec<Product> {
+    Vec::with_capacity(capacity)
+}
 
-    // Entry API: efisiensi update frekuensi kata
-    for word in text.split_whitespace() {
-        stats.entry(word)
+pub fn add_product(inventory: &mut Vec<Product>, product: Product) {
+    inventory.push(product);
+}
+
+// 2. Safe get access
+pub fn get_product_safely(inventory: &[Product], index: usize) -> Option<&Product> {
+    inventory.get(index)
+}
+
+// 3. In-place retain
+pub fn filter_in_stock_only(inventory: &mut Vec<Product>) {
+    inventory.retain(|p| p.stock > 0);
+}
+
+// 4 & 5. HashMap Entry API: entry, and_modify, or_insert
+pub fn calculate_stock_by_category(inventory: &[Product]) -> HashMap<String, u32> {
+    let mut category_map: HashMap<String, u32> = HashMap::new();
+
+    for product in inventory {
+        category_map
+            .entry(product.category.clone())
+            .and_modify(|total| *total += product.stock)
+            .or_insert(product.stock);
+    }
+
+    category_map
+}
+
+pub fn count_log_events(events: &[&str]) -> HashMap<String, usize> {
+    let mut stats: HashMap<String, usize> = HashMap::new();
+
+    for &event in events {
+        stats
+            .entry(event.to_string())
             .and_modify(|count| *count += 1)
             .or_insert(1);
     }
-    println!("Frekuensi: {:?}", stats);
+
+    stats
 }
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+=== Fase 6 - Task 4: Collections — Vec<T> & HashMap Entry API ===
+Konsep Inti: Alokasi efisien with_capacity, safe access get, retain in-place, & Entry API
+
+1. Demonstrasi Vec::with_capacity & push:
+   - Initial State: len = 0, capacity = 5
+   - After 5 Push : len = 5, capacity = 5
+
+2. Akses Aman Index via .get():
+   - Index 0  : Some("Mechanical Keyboard")
+   - Index 99 : None
+
+3. In-Place Filtering via .retain() (Membuang stock == 0):
+   - Jumlah produk sebelum retain: 5
+   - Jumlah produk setelah retain : 3
+     * [ID: 1] Mechanical Keyboard (Stock: 15)
+     * [ID: 3] Ergonomic Chair (Stock: 5)
+     * [ID: 5] USB-C Hub (Stock: 25)
+
+4. Agregasi Data via HashMap Entry API (.entry().and_modify().or_insert()):
+   - Kategori 'Furniture': Total Stok = 5 unit
+   - Kategori 'Electronics': Total Stok = 40 unit
+
+5. Frekuensi Event Log via Entry API:
+   - Event 'CLICK': 1 kali
+   - Event 'LOGOUT': 1 kali
+   - Event 'VIEW': 2 kali
+   - Event 'LOGIN': 3 kali
+```
+
+---
+
+### 6.5 Mini Project: CLI Task Manager v1 & Evaluasi Kelulusan Fase 6
+
+Mini project ini menyatukan seluruh pilar Fase 6 ke dalam sebuah arsitektur aplikasi manajemen tugas (*Task Manager*) yang aman, efisien, dan bebas fatal crash (*zero unwrap*).
+
+---
+
+#### 1. Evaluasi Kriteria Kelulusan Fase 6
+
+##### A. Kapan Menggunakan `Option<T>` vs `Result<T, E>`?
+- **Gunakan `Option<T>`**: Ketika ketiadaan nilai adalah hal yang wajar (*normal absence of data*) dan caller tidak memerlukan alasan mengapa data itu kosong.
+  - *Contoh*: Field `description` pada task (bisa `Some("detail")` atau `None`), lookup user di cache (jika miss, tinggal fetch ke DB).
+- **Gunakan `Result<T, E>`**: Ketika sebuah operasi berpotensi gagal (*recoverable failure*) dan caller **wajib mengetahui alasan kegagalan** untuk mengambil tindakan korektif.
+  - *Contoh*: Parsing ID dari input user (`InvalidId`), mencari task ID yang tidak terdaftar (`TaskNotFound`), atau operasi file (`Io`).
+
+##### B. Disiplin *Zero `unwrap()`* pada Jalur Input
+Pemanggilan `.unwrap()` pada data mentah dari pengguna adalah bom waktu (*runtime panic*). Di level produksi, semua parsing input dipetakan menggunakan `Result`, `map_err`, dan operator `?`:
+
+```rust
+// ✅ AMAN: Mengubah ParseIntError menjadi Domain Error tanpa crash
+let parsed_id = raw_id
+    .trim()
+    .parse::<u32>()
+    .map_err(|_| TaskManagerError::InvalidId(raw_id.to_string()))?;
+```
+
+##### C. HashMap Entry API untuk Analisis Domain
+Menghitung agregasi data kategori task tanpa double lookup menggunakan pola idiomatik `.entry().and_modify().or_insert()`.
+
+---
+
+#### 2. Kode Implementasi Terintegrasi (`src/mini_project_6.rs`)
+
+```rust
+// Mini Project Fase 6: CLI Task Manager v1 & Error Handling Integration
+use std::collections::HashMap;
+use std::fmt;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum TaskManagerError {
+    TaskNotFound(u32),
+    EmptyTitle,
+    InvalidId(String),
+}
+
+impl fmt::Display for TaskManagerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TaskManagerError::TaskNotFound(id) => write!(f, "Task dengan ID #{id} tidak ditemukan"),
+            TaskManagerError::EmptyTitle => write!(f, "Judul task tidak boleh kosong"),
+            TaskManagerError::InvalidId(raw) => {
+                write!(f, "ID task '{raw}' tidak valid (harus berupa bilangan bulat positif)")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TaskManagerError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskItem {
+    pub id: u32,
+    pub title: String,
+    pub category: String,
+    pub description: Option<String>,
+}
+
+pub struct TaskManager {
+    tasks: Vec<TaskItem>,
+    next_id: u32,
+}
+
+impl TaskManager {
+    pub fn new() -> Self {
+        Self {
+            tasks: Vec::with_capacity(16),
+            next_id: 1,
+        }
+    }
+
+    // 1. Add Task
+    pub fn add_task(&mut self, title: &str, category: &str, description: Option<&str>) -> Result<u32, TaskManagerError> {
+        let trimmed_title = title.trim();
+        if trimmed_title.is_empty() {
+            return Err(TaskManagerError::EmptyTitle);
+        }
+
+        let id = self.next_id;
+        self.next_id += 1;
+
+        self.tasks.push(TaskItem {
+            id,
+            title: trimmed_title.to_string(),
+            category: if category.trim().is_empty() { "General".to_string() } else { category.trim().to_string() },
+            description: description.map(|d| d.trim().to_string()),
+        });
+
+        Ok(id)
+    }
+
+    // 2. List Tasks
+    pub fn list_tasks(&self) -> &[TaskItem] {
+        &self.tasks
+    }
+
+    // 3. Find Task
+    pub fn find_task(&self, id: u32) -> Result<&TaskItem, TaskManagerError> {
+        self.tasks.iter().find(|t| t.id == id).ok_or(TaskManagerError::TaskNotFound(id))
+    }
+
+    // 4. Delete Task
+    pub fn delete_task(&mut self, id: u32) -> Result<TaskItem, TaskManagerError> {
+        let index = self.tasks.iter().position(|t| t.id == id).ok_or(TaskManagerError::TaskNotFound(id))?;
+        Ok(self.tasks.remove(index))
+    }
+
+    // 5. Entry API Kategori
+    pub fn get_category_stats(&self) -> HashMap<String, usize> {
+        let mut stats: HashMap<String, usize> = HashMap::new();
+        for task in &self.tasks {
+            stats.entry(task.category.clone()).and_modify(|count| *count += 1).or_insert(1);
+        }
+        stats
+    }
+
+    // 6. Safe Parsing Input Utama (Bebas unwrap)
+    pub fn parse_and_find(&self, raw_id: &str) -> Result<&TaskItem, TaskManagerError> {
+        let parsed_id = raw_id
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| TaskManagerError::InvalidId(raw_id.trim().to_string()))?;
+        self.find_task(parsed_id)
+    }
+}
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+============================================================
+=== Mini Project Fase 6: CLI Task Manager v1 & Error Safe ===
+============================================================
+
+1. Menambahkan Task (dengan Option description):
+   [+] Task #1 dibuat
+   [+] Task #2 dibuat
+   [+] Task #3 dibuat
+   [+] Task #4 dibuat
+
+2. Daftar Task Aktif Saat Ini:
+   - [#1 ] [Backend   ] Implementasi JWT Authentication  -> Gunakan RS256 algorithm dan refresh token rotation
+   - [#2 ] [Database  ] Desain Database Schema           -> (Tanpa deskripsi)
+   - [#3 ] [Testing   ] Buat Unit Test Axum Handlers     -> (Tanpa deskripsi)
+   - [#4 ] [DevOps    ] Setup CI/CD Pipeline             -> GitHub Actions workflow
+
+3. Pencarian Task (Find Task):
+   [✓] Ditemukan: [#1] Implementasi JWT Authentication
+   [✓ Diharapkan] Error ketika task tidak ditemukan: 'Task dengan ID #999 tidak ditemukan'
+
+4. Proteksi Jalur Input Utama (Bebas unwrap!):
+   - Input '2' -> Ditemukan: 'Desain Database Schema'
+   - Input 'bukan_angka' -> Ditangani Aman: 'ID task 'bukan_angka' tidak valid (harus berupa bilangan bulat positif)'
+   - Input '888' -> Ditangani Aman: 'Task dengan ID #888 tidak ditemukan'
+
+5. Menghapus Task (Delete Task):
+   [✓] Berhasil menghapus task #2: 'Desain Database Schema'
+   [✓ Diharapkan] Menghapus task yang sudah terhapus: 'Task dengan ID #2 tidak ditemukan'
+
+6. Statistik Kategori via HashMap Entry API:
+   - Kategori 'DevOps': 1 task aktif
+   - Kategori 'Backend': 1 task aktif
+   - Kategori 'Testing': 1 task aktif
+
+7. Eksekusi Perintah Parser CLI (ADD / FIND / DEL):
+   - Command ADD  -> Ok("Task #5 ('RefactorCode') berhasil ditambahkan")
+   - Command FIND -> Ok("Ditemukan: [#5] RefactorCode (Backend)")
+   - Command DEL  -> Ok("Task #5 ('RefactorCode') berhasil dihapus")
+
+8. Evaluasi Kriteria Lulus Fase 6:
+   [x] Kapan Option vs Result: Option untuk ketiadaan nilai wajar; Result untuk operasi yang bisa gagal.
+   [x] Pemakaian Operator ?: Propagasi error otomatis di parse_and_find dan execute_command.
+   [x] Custom Error: TaskManagerError dengan trait Display, Debug, dan std::error::Error.
+   [x] HashMap Entry API: Digunakan pada get_category_stats() dengan entry(), and_modify(), or_insert().
+   [x] Zero unwrap() pada input: Semua input parsing dipetakan aman via Result & map_err.
 ```
 
 ---
 
 ## FASE 7: Generics, Traits, & Advanced Trait System
 
-Trait adalah pondasi abstraksi dan polimorfisme di Rust.
+Trait dan Generics adalah pondasi abstraksi dan polimorfisme di Rust tanpa mengandalkan konsep pewarisan (*inheritance*).
 
-### 7.1 Static Dispatch vs Dynamic Dispatch
-- **Static Dispatch (Generics `T: Trait`)**: Compiler membuat duplikat kode mesin untuk setiap tipe konkret saat kompilasi (**Monomorphization**). Tidak ada overhead performa saat runtime (*Zero-Cost Abstraction*).
-- **Dynamic Dispatch (`dyn Trait`)**: Menggunakan pointer tabel fungsi virtual (*vtable fat pointer*). Digunakan saat koleksi menyimpan objek-objek heterogen.
+### 7.1 Generic Functions & Trait Bounds (Task 1)
+
+Generics memungkinkan penulisan algoritma yang fleksibel dan reusable untuk berbagai tipe data tanpa mengorbankan performa ataupun *type safety*.
+
+#### 1. Masalah: Duplikasi Kode vs Abstraksi Generic
+Tanpa generics, fungsi pencarian nilai terbesar membutuhkan definisi terpisah untuk setiap tipe data (`largest_i32`, `largest_f64`, `largest_char`). Dengan generic type parameter `<T>`, satu fungsi berlaku untuk semua tipe yang valid.
+
+#### 2. Konsep Monomorphization (Zero-Cost Abstractions)
+Rust tidak menggunakan runtime reflection atau dynamic boxing untuk generics standar. Saat proses kompilasi (`cargo build`), compiler melakukan proses **Monomorphization**, yaitu menduplikasi kode mesin spesifik untuk setiap tipe konkret yang digunakan (`find_largest` untuk `i32`, `find_largest` untuk `f64`, dst.). 
+Dampaknya: **Performa eksekusi setara dengan kode yang ditulis khusus secara manual tanpa biaya abstraksi saat runtime (*Zero-Cost Abstraction*)!**
+
+#### 3. Trait Bounds & Klausa `where`
+Secara default, tipe generic `<T>` tidak memiliki kapabilitas bawaan apapun. Untuk melakukan operasi tertentu pada `T`, kita wajib membatasinya dengan **Trait Bounds**:
+- `T: PartialOrd`: Mengizinkan operator perbandingan relasional (`>`, `<`, `>=`, `<=`).
+- `T: std::fmt::Display`: Mengizinkan pemformatan teks ramah pengguna via `{}`.
+- `T: std::fmt::Debug`: Mengizinkan inspeksi debugging via `{:?}`.
+- **Klausa `where`**: Memindahkan deklarasi batasan kompleks ke baris bawah signature fungsi untuk keterbacaan kode yang bersih saat terdapat banyak parameter tipe atau batasan closure bertingkat.
+
+---
+
+#### 4. Bedah Implementasi Tiga Target Task 1
+
+##### A. Memilih Nilai Terbesar: `find_largest<T: PartialOrd>(list: &[T]) -> Option<&T>`
+- Menerima slice referensi `&[T]` agar tidak mengambil kepemilikan (*zero copy*).
+- Menghindari fatal crash runtime: jika slice kosong (`list.is_empty()`), fungsi mengembalikan `None`.
+- Menggunakan trait bound `PartialOrd` sehingga kompatibel dengan integer, float, string (`&str`), maupun struct kustom:
 
 ```rust
-pub trait Storage: Send + Sync {
-    fn save(&self, data: &[u8]) -> Result<(), String>;
+pub fn find_largest<T: PartialOrd>(list: &[T]) -> Option<&T> {
+    if list.is_empty() {
+        return None;
+    }
+
+    let mut largest = &list[0];
+    for item in &list[1..] {
+        if item > largest {
+            largest = item;
+        }
+    }
+
+    Some(largest)
+}
+```
+
+##### B. Mencetak Nilai: `print_item`, `print_collection`, & `print_debug_item`
+- `T: Display` digunakan untuk pencetakan langsung `{}`.
+- `T: Debug` digunakan untuk inspeksi struktural `{:?}`.
+- `print_collection` menerima slice koleksi `&[T]` dan mencetak setiap elemen secara rapi berurutan.
+
+```rust
+pub fn print_item<T: Display>(label: &str, item: &T) {
+    println!("{label}: {item}");
 }
 
-// Static Dispatch: Monomorphized, performa maksimal
-pub fn persist_static<T: Storage>(storage: &T, data: &[u8]) {
-    let _ = storage.save(data);
+pub fn print_collection<T: Display>(header: &str, items: &[T]) {
+    println!("{header}:");
+    for (idx, item) in items.iter().enumerate() {
+        println!("  [{idx}] {item}");
+    }
+}
+```
+
+##### C. Mengubah Collection: Pemetaan & Mutasi In-Place
+1. **Transformasi Pemetaan (`Vec<T>` -> `Vec<U>`)**:
+   Menerima fungsi/closure `F: FnMut(T) -> U` untuk memetakan elemen tipe `T` ke tipe baru `U` (misal angka ke teks berformat). Alokasi memori dioptimalkan dengan `Vec::with_capacity(items.len())`.
+2. **Transformasi Mutasi In-Place (`&mut [T]`)**:
+   Memodifikasi elemen slice referensi secara langsung di tempat (*in-place*) tanpa alokasi heap baru, menggunakan closure `F: FnMut(&mut T)`.
+
+```rust
+pub fn transform_collection<T, U, F>(items: Vec<T>, mut transform_fn: F) -> Vec<U>
+where
+    F: FnMut(T) -> U,
+{
+    let mut result = Vec::with_capacity(items.len());
+    for item in items {
+        result.push(transform_fn(item));
+    }
+    result
 }
 
-// Dynamic Dispatch: Menggunakan vtable di balik Box/referensi
-pub fn persist_dynamic(storage: &dyn Storage, data: &[u8]) {
-    let _ = storage.save(data);
+pub fn transform_collection_mut<T, F>(items: &mut [T], mut transform_fn: F)
+where
+    F: FnMut(&mut T),
+{
+    for item in items.iter_mut() {
+        transform_fn(item);
+    }
 }
 ```
 
 ---
 
-### 7.2 Associated Types, Supertraits, & Orphan Rule
+#### 5. Kode Lengkap Terintegrasi (`src/fase7_task_1.rs`)
+
 ```rust
-// 1. Associated Types: mendefinisikan tipe terikat di dalam trait
+use std::fmt::{Debug, Display};
+
+pub fn find_largest<T: PartialOrd>(list: &[T]) -> Option<&T> {
+    if list.is_empty() {
+        return None;
+    }
+
+    let mut largest = &list[0];
+    for item in &list[1..] {
+        if item > largest {
+            largest = item;
+        }
+    }
+
+    Some(largest)
+}
+
+pub fn print_item<T: Display>(label: &str, item: &T) {
+    println!("{label}: {item}");
+}
+
+pub fn print_debug_item<T: Debug>(label: &str, item: &T) {
+    println!("{label} (Debug): {item:?}");
+}
+
+pub fn print_collection<T: Display>(header: &str, items: &[T]) {
+    println!("{header}:");
+    if items.is_empty() {
+        println!("  (koleksi kosong)");
+        return;
+    }
+    for (idx, item) in items.iter().enumerate() {
+        println!("  [{idx}] {item}");
+    }
+}
+
+pub fn transform_collection<T, U, F>(items: Vec<T>, mut transform_fn: F) -> Vec<U>
+where
+    F: FnMut(T) -> U,
+{
+    let mut result = Vec::with_capacity(items.len());
+    for item in items {
+        result.push(transform_fn(item));
+    }
+    result
+}
+
+pub fn transform_collection_mut<T, F>(items: &mut [T], mut transform_fn: F)
+where
+    F: FnMut(&mut T),
+{
+    for item in items.iter_mut() {
+        transform_fn(item);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerScore {
+    pub name: String,
+    pub score: u32,
+}
+
+impl PartialOrd for PlayerScore {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PlayerScore {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.score.cmp(&other.score)
+    }
+}
+
+impl Display for PlayerScore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Player '{}' [Score: {}]", self.name, self.score)
+    }
+}
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+============================================================
+=== Fase 7 - Task 1: Generic Functions & Trait Bounds    ===
+============================================================
+
+1. Memilih Nilai Terbesar (find_largest):
+   - Integer terbesar dari [42, 108, 17, 99, 5]: 108
+   - Float terbesar dari [3.14, 2.71, 9.81, 1.41]: 9.81
+   - Word terbesar secara alfabetis dari ["rust", "generics", "monomorphization", "traits"]: "traits"
+   - Skor tertinggi (Custom Struct): Player 'Bob' [Score: 550]
+   - Slice kosong: None (Aman, zero panic)
+
+2. Mencetak Nilai (print_item & print_collection):
+   - Single Item (i32): 1337
+   - Single Item (String): Rust Zero-Cost Abstractions
+   - Debug Item (Debug): ["A", "B", "C"]
+   - Daftar Kota:
+  [0] Jakarta
+  [1] Bandung
+  [2] Surabaya
+  [3] Yogyakarta
+
+3. Mengubah Collection (transform_collection & transform_collection_mut):
+   - Transformasi Pemetaan (Vec<i32> -> Vec<String>):
+     * Item #1 (Kuadrat: 1)
+     * Item #2 (Kuadrat: 4)
+     * Item #3 (Kuadrat: 9)
+     * Item #4 (Kuadrat: 16)
+     * Item #5 (Kuadrat: 25)
+   - In-place mutation sebelum: [10, 20, 30, 40]
+   - In-place mutation setelah (x2): [20, 40, 60, 80]
+```
+
+---
+
+### 7.2 Traits, Default Implementation & Trait Bounds (Task 2)
+
+#### 1. Mental Model: Apa itu Trait?
+
+Di bahasa pemrograman seperti Java, PHP, atau TypeScript, kita terbiasa dengan konsep **OOP Inheritance** (Class `Hewan`, lalu di-*extends* jadi `Kucing`).
+
+Rust **tidak memiliki Class maupun pewarisan (inheritance)**. Sebagai gantinya, Rust menggunakan **Trait**.
+
+> **Analogi Trait = "Sertifikat Kemampuan" atau "Kontrak Kerja".**
+
+Bayangkan kita punya sertifikat: **`BisaDiringkas` (Trait `Summary`)**.
+Sertifikat ini mensyaratkan satu hal:
+> *"Siapa pun tipe data yang memegang sertifikat ini, wajib punya kemampuan untuk menghasilkan teks ringkasan lewat fungsi `summarize()`."*
+
+Bentuk datanya boleh apa saja dan sangat berbeda di memori:
+- `NewsArticle` punya `headline`, `location`, `author`, `content`.
+- `Tweet` punya `username`, `content`, `reply`, `retweet`.
+
+Keduanya adalah entitas data yang berbeda total, tetapi **keduanya sama-sama memegang sertifikat `Summary`**.
+
+```text
+┌───────────────────────┐         ┌───────────────────────┐
+│  Struct: NewsArticle  │         │     Struct: Tweet     │
+│  - headline           │         │  - username           │
+│  - author             │         │  - content            │
+└───────────┬───────────┘         └───────────┬───────────┘
+            │                                 │
+            ▼                                 ▼
+   Keduanya sama-sama mengimplementasikan Trait:
+   ┌─────────────────────────────────────────────────────┐
+   │                    Trait: Summary                   │
+   │  fn summarize(&self) -> String                      │
+   └─────────────────────────────────────────────────────┘
+```
+
+---
+
+#### 2. Anatomi Trait & Default Implementation
+Sebuah trait dapat menyediakan implementasi default untuk salah satu atau semua method-nya. Ini seperti **template bawaan pabrik**:
+- **Kasus 1: Meng-override (Menimpa) Default Implementation**:
+  Pada `NewsArticle`, artikel berita ingin formatnya formal dan detail (headline + author + location), sehingga method default `summarize()` ditimpa dengan logika kustom.
+- **Kasus 2: Memanfaatkan Default Implementation (Tanpa Tulis Ulang)**:
+  Pada `Tweet`, cuitan Twitter hanya perlu memberitahu siapa nama usernya via `summarize_author()`, sedangkan pemanggilan `summarize()` otomatis mewarisi template bawaan: `"(Baca selengkapnya dari @username...)"`.
+- **Kasus 3: Full Default Implementation**:
+  Pada `CommunityNotice`, struct langsung mengosongkan blok `impl Summary for CommunityNotice {}` untuk mewarisi seluruh method bawaan tanpa ubahan sedikit pun.
+
+```rust
+pub trait Summary {
+    // 1. Method pembantu (punya nilai bawaan "Kontributor Anonim")
+    fn summarize_author(&self) -> String {
+        String::from("Kontributor Anonim")
+    }
+
+    // 2. Default Implementation: Template kalimat standar
+    fn summarize(&self) -> String {
+        format!("(Baca selengkapnya dari {}...)", self.summarize_author())
+    }
+}
+```
+
+---
+
+#### 3. Mengapa Perlu "Trait Bounds"?
+
+Misalkan kita ingin membuat fungsi generic `notify`:
+
+##### Mengapa kode berikut DITOLAK oleh compiler?
+```rust
+// ❌ ERROR COMPILER:
+fn notify<T>(item: &T) {
+    println!("Pemberitahuan: {}", item.summarize());
+}
+```
+**Alasan Compiler:**
+`T` bisa berupa apa saja—bisa integer `42`, boolean `true`, atau struct kosong. Angka `42` tidak memiliki method `.summarize()`. Jika dibiarkan lolos, program akan *crash runtime*!
+
+##### Solusinya: Pasang Satpam Pembatas ("Trait Bound")
+Kita wajib memberi tahu compiler:
+> *"Fungsi ini generic untuk tipe `T`, TAPI hanya boleh menerima tipe `T` yang sudah mengimplementasikan trait `Summary`!"*
+
+```rust
+// ✅ VALID (Ada Trait Bound <T: Summary>):
+pub fn notify<T: Summary>(item: &T) -> String {
+    format!("Pemberitahuan Terkini: {}", item.summarize())
+}
+```
+
+Compiler menjamin keamanan mutlak:
+- `notify(&article)` -> ✅ **Diterima**, karena `NewsArticle` punya sertifikasi `Summary`.
+- `notify(&tweet)` -> ✅ **Diterima**, karena `Tweet` punya sertifikasi `Summary`.
+- `notify(&42)` -> ❌ **Ditolak saat kompilasi** (Zero runtime bugs).
+
+---
+
+#### 4. Ragam Gaya Menulis Trait Bounds
+
+| Gaya Sintaks | Contoh Kode | Kapan Dipakai? |
+| :--- | :--- | :--- |
+| **1. Standard Trait Bound** | `fn notify<T: Summary>(item: &T)` | Paling umum, cocok jika parameter generic harus bertipe sama persis. |
+| **2. Multiple Bounds (`+`)** | `fn notify_verbose<T: Summary + Display>(item: &T)` | Saat tipe membutuhkan lebih dari 1 trait sekaligus (bisa diringkas `Summary` DAN bisa dicetak via `Display`). |
+| **3. Klausa `where`** | `fn notify_where<T>(item: &T) where T: Summary` | Dipakai saat batasannya panjang/kompleks agar signature fungsi tetap rapi dan mudah dibaca. |
+| **4. `impl Trait` (Syntactic Sugar)** | `fn notify_impl(item: &impl Summary)` | Paling ringkas & ergonomis untuk fungsi sederhana. |
+
+
+---
+
+#### 5. Kode Lengkap Terintegrasi (`src/fase7_task_2.rs`)
+
+```rust
+use std::fmt::{self, Display, Formatter};
+
+pub trait Summary {
+    fn summarize_author(&self) -> String {
+        String::from("Kontributor Anonim")
+    }
+
+    fn summarize(&self) -> String {
+        format!("(Baca selengkapnya dari {}...)", self.summarize_author())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewsArticle {
+    pub headline: String,
+    pub location: String,
+    pub author: String,
+    pub content: String,
+}
+
+impl Summary for NewsArticle {
+    fn summarize_author(&self) -> String {
+        self.author.clone()
+    }
+
+    fn summarize(&self) -> String {
+        format!("{}, oleh {} ({})", self.headline, self.author, self.location)
+    }
+}
+
+impl Display for NewsArticle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "[BERITA] \"{}\" - {}", self.headline, self.author)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tweet {
+    pub username: String,
+    pub content: String,
+    pub reply: bool,
+    pub retweet: bool,
+}
+
+impl Summary for Tweet {
+    fn summarize_author(&self) -> String {
+        format!("@{}", self.username)
+    }
+}
+
+impl Display for Tweet {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "[TWEET] @{}: \"{}\"", self.username, self.content)
+    }
+}
+
+pub fn notify<T: Summary>(item: &T) -> String {
+    format!("Pemberitahuan Terkini: {}", item.summarize())
+}
+
+pub fn notify_verbose<T: Summary + Display>(item: &T) -> String {
+    format!("Notifikasi Lengkap: {}\n   -> Display: {}", item.summarize(), item)
+}
+
+pub fn notify_where<T>(item: &T) -> String
+where
+    T: Summary,
+{
+    format!("Pemberitahuan (via where clause): {}", item.summarize())
+}
+
+pub fn notify_impl(item: &impl Summary) -> String {
+    format!("Pemberitahuan (via impl Trait): {}", item.summarize())
+}
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+============================================================
+=== Fase 7 - Task 2: Traits & Trait Bounds               ===
+============================================================
+
+1. Eksekusi Trait Method:
+   - NewsArticle (Overridden summarize) : Rust 2024 Edition Resmi Dirilis, oleh Tech Wire (San Francisco)
+   - Tweet (Default summarize)           : (Baca selengkapnya dari @rustacean_id...)
+   - CommunityNotice (Full Default)     : (Baca selengkapnya dari Kontributor Anonim...)
+
+2. Pemanggilan Fungsi dengan Trait Bounds:
+   a. notify<T: Summary>(&article):
+      Pemberitahuan Terkini: Rust 2024 Edition Resmi Dirilis, oleh Tech Wire (San Francisco)
+   b. notify<T: Summary>(&tweet):
+      Pemberitahuan Terkini: (Baca selengkapnya dari @rustacean_id...)
+
+3. Multiple Trait Bounds (<T: Summary + Display>):
+   Notifikasi Lengkap: Rust 2024 Edition Resmi Dirilis, oleh Tech Wire (San Francisco)
+   -> Display: [BERITA] "Rust 2024 Edition Resmi Dirilis" - Tech Wire
+   Notifikasi Lengkap: (Baca selengkapnya dari @rustacean_id...)
+   -> Display: [TWEET] @rustacean_id: "Belajar trait di Rust sangat menyenangkan dan type-safe!"
+
+4. Sintaks Alternatif Trait Bounds:
+   - where clause : Pemberitahuan (via where clause): Rust 2024 Edition Resmi Dirilis, oleh Tech Wire (San Francisco)
+   - impl Trait   : Pemberitahuan (via impl Trait): (Baca selengkapnya dari @rustacean_id...)
+```
+
+---
+
+### 7.3 Static Dispatch vs Dynamic Dispatch (Task 3)
+
+Polimorfisme di Rust dapat diselesaikan melalui dua cara yang berbeda secara fundamental: **Static Dispatch** pada waktu kompilasi (*compile-time*) atau **Dynamic Dispatch** pada saat runtime (*run-time*).
+
+```rust
+// Dua Versi Pemrosesan Dispatch:
+fn process_static<T: Summary>(item: &T);    // Static Dispatch (Generics & Monomorphization)
+fn process_dynamic(item: &dyn Summary);     // Dynamic Dispatch (Trait Object & vtable)
+```
+
+---
+
+#### 1. Perbandingan Karakteristik Head-to-Head
+
+| Karakteristik | Static Dispatch (`T: Trait`) | Dynamic Dispatch (`&dyn Trait` / `Box<dyn Trait>`) |
+| :--- | :--- | :--- |
+| **Waktu Resolusi** | Saat kompilasi (*Compile-time*) | Saat program berjalan (*Runtime*) |
+| **Mekanisme** | **Monomorphization**: Compiler membuat salinan fungsi biner khusus per tipe konkret | **Trait Object**: Menggunakan pointer ke tabel fungsi virtual (*vtable*) |
+| **Overhead Performa** | **Nol (Zero-Cost Abstraction)**; instruksi langsung ke alamat fungsi | Ada sedikit overhead dereferensi pointer vtable (*pointer indirection*) |
+| **Optimasi Compiler** | **Bisa di-inline** oleh LLVM untuk kecepatan maksimal | **Tidak bisa di-inline** karena target fungsi ditentukan saat runtime |
+| **Koleksi Heterogen** | ❌ **Tidak bisa**: `Vec<T>` hanya dapat menampung satu tipe seragam | ✅ **Bisa**: `Vec<Box<dyn Trait>>` bisa menampung campuran berbagai struct |
+| **Ukuran Pointer** | **Thin Pointer** (1 kata mesin: 8 bytes pada arsitektur 64-bit) | **Fat Pointer** (2 kata mesin: 16 bytes = 8B data ptr + 8B vtable ptr) |
+| **Ukuran Binary** | Berpotensi membesar jika tipe sangat banyak (*Code Bloat*) | Ukuran biner lebih ramping karena hanya ada satu fungsi generik |
+
+---
+
+#### 2. Bedah Arsitektur Memori: Thin Pointer vs Fat Pointer
+
+Mengapa pointer trait object (`&dyn Summary` atau `Box<dyn Summary>`) berukuran **16 bytes** sedangkan referensi biasa (`&NewsArticle`) hanya berukuran **8 bytes**?
+
+```text
+1. Thin Pointer (&NewsArticle - 8 Bytes):
+   ┌────────────────────────┐
+   │ Pointer Data (8 Bytes) ├────────► [ Data Struct NewsArticle di Memory ]
+   └────────────────────────┘
+
+2. Fat Pointer (&dyn Summary - 16 Bytes):
+   ┌────────────────────────┐
+   │ Pointer Data (8 Bytes) ├────────► [ Data Struct di Memory (NewsArticle / Tweet) ]
+   ├────────────────────────┤
+   │ Pointer Vtable (8 Bytes)├───────► [ Virtual Method Table (vtable) ]
+   └────────────────────────┘          ├── Pointer ke method summarize()
+                                       ├── Pointer ke method drop()
+                                       ├── Ukuran tipe (size)
+                                       └── Alignment memori (align)
+```
+
+Karena compiler tidak tahu struct apa yang berada di balik `&dyn Summary` saat runtime, Rust menyertakan **Fat Pointer** yang membawa alamat tabel metode (*vtable*) agar program tahu persis fungsi mana yang harus dipanggil.
+
+---
+
+#### 3. Kapan Menggunakan `Box<dyn Trait>`?
+
+Secara default, tipe trait object `dyn Summary` adalah tipe **DST (Dynamically Sized Type)** yang ukurannya tidak diketahui secara pasti saat kompilasi. Oleh karena itu, kita tidak bisa menyimpan `dyn Summary` secara langsung di stack.
+
+Kita wajib membungkusnya di balik pointer berukuran pasti:
+- Sebagai referensi borrow: `&dyn Summary` (16 bytes di stack).
+- Sebagai kepemilikan heap: `Box<dyn Summary>` (16 bytes pointer di stack, alokasi data di heap).
+
+##### Contoh Kasus Nyata: Koleksi Heterogen
+Jika kita ingin menyimpan daftar feed campuran yang berisi `NewsArticle`, `Tweet`, dan `PodcastEpisode` dalam satu `Vec`:
+
+```rust
+// ✅ Koleksi Heterogen: Seluruh tipe berbeda dibungkus Box<dyn Summary>
+let feed: Vec<Box<dyn Summary>> = vec![
+    Box::new(article),
+    Box::new(tweet),
+    Box::new(podcast),
+];
+
+for item in &feed {
+    println!("{}", item.summarize()); // Dynamic dispatch memanggil method yang sesuai
+}
+```
+
+---
+
+#### 4. Kode Lengkap Terintegrasi (`src/fase7_task_3.rs`)
+
+```rust
+use crate::fase7_task_2::{NewsArticle, Summary, Tweet};
+use std::mem;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PodcastEpisode {
+    pub show_name: String,
+    pub host: String,
+    pub episode_number: u32,
+}
+
+impl Summary for PodcastEpisode {
+    fn summarize_author(&self) -> String {
+        format!("Host: {}", self.host)
+    }
+
+    fn summarize(&self) -> String {
+        format!("Podcast '{}' Ep. #{} ({})", self.show_name, self.episode_number, self.summarize_author())
+    }
+}
+
+// 1. Static Dispatch: Monomorphization via Generics T: Summary
+pub fn process_static<T: Summary>(item: &T) -> String {
+    format!("[Static Dispatch] {}", item.summarize())
+}
+
+// 2. Dynamic Dispatch: Trait Object via Fat Pointer &dyn Summary
+pub fn process_dynamic(item: &dyn Summary) -> String {
+    format!("[Dynamic Dispatch] {}", item.summarize())
+}
+
+// 3. Dynamic Dispatch dengan Heap Allocation: Box<dyn Summary>
+pub fn process_boxed(item: &Box<dyn Summary>) -> String {
+    format!("[Boxed dyn Summary] {}", item.summarize())
+}
+
+// 4. Koleksi Heterogen
+pub fn process_heterogeneous_collection(items: &[Box<dyn Summary>]) -> Vec<String> {
+    items.iter().map(|item| item.summarize()).collect()
+}
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+============================================================
+=== Fase 7 - Task 3: Static vs Dynamic Dispatch          ===
+============================================================
+
+1. Perbandingan Eksekusi:
+   a. [Static Dispatch] Deep Dive Rust Dispatch, oleh Senior Rustacean (Jakarta)
+   b. [Static Dispatch] (Baca selengkapnya dari @ferris_the_crab...)
+   c. [Static Dispatch] Podcast 'Rust Nation Podcast' Ep. #42 (Host: Budi Santoso)
+
+2. Dynamic Dispatch via &dyn Summary:
+   a. [Dynamic Dispatch] Deep Dive Rust Dispatch, oleh Senior Rustacean (Jakarta)
+   b. [Dynamic Dispatch] (Baca selengkapnya dari @ferris_the_crab...)
+   c. [Dynamic Dispatch] Podcast 'Rust Nation Podcast' Ep. #42 (Host: Budi Santoso)
+
+3. Koleksi Heterogen via Vec<Box<dyn Summary>>:
+   [0] Deep Dive Rust Dispatch, oleh Senior Rustacean (Jakarta)
+   [1] (Baca selengkapnya dari @ferris_the_crab...)
+   [2] Podcast 'Rust Nation Podcast' Ep. #42 (Host: Budi Santoso)
+
+4. Analisis Memori Fat Pointer vs Thin Pointer:
+   - Ukuran referensi konkret &NewsArticle (Thin Pointer) : 8 bytes
+   - Ukuran referensi trait object &dyn Summary (Fat Pointer): 16 bytes
+   - Ukuran Box<NewsArticle> (Heap Thin Pointer)          : 8 bytes
+   - Ukuran Box<dyn Summary> (Heap Fat Pointer)           : 16 bytes
+   -> Fat Pointer berukuran 2x pointer biasa: [Pointer Data (8B)] + [Pointer Vtable (8B)]
+```
+
+
+---
+
+### 7.4 Associated Types in Traits (Task 4)
+
+Associated Types menghubungkan sebuah tipe *placeholder* di dalam definisi trait, di mana tipe konkretnya baru ditetapkan oleh struct yang mengimplementasikannya.
+
+```rust
 pub trait Repository {
-    type Item; // Associated type
+    type Item;  // Associated type untuk tipe entitas
+    type Error; // Associated type untuk tipe galat
+
+    fn get(&self, id: u64) -> Result<Option<Self::Item>, Self::Error>;
+}
+```
+
+---
+
+#### 1. Mengapa Associated Types? (Associated Types vs Generic Parameters)
+
+Pertanyaan umum pemula: *Mengapa tidak memakai generic parameter biasa seperti `trait Repository<Item, Error>`?*
+
+##### Perbandingan Arsitektural:
+
+| Aspek | Generic Trait: `Repository<Item, Error>` | Associated Types: `type Item; type Error;` |
+| :--- | :--- | :--- |
+| **Hubungan Tipe** | **1-ke-Banyak (1-to-Many)**: Satu struct bisa mengimplementasikan `Repository<User>` DAN `Repository<Product>`. | **1-ke-1 (1-to-1)**: Satu struct secara tegas hanya mengelola 1 tipe entitas dan 1 tipe error. |
+| **Kebersihan Signature** | ❌ **Berisik (Polluted Signature)**: Setiap fungsi harus menulis ulang parameter generic: `fn use_repo<R, I, E>(r: &R) where R: Repository<I, E>`. | ✅ **Bersih & Ergonomis**: Cukup tulis `fn use_repo<R: Repository>(r: &R)`. |
+| **Ambiguitas Pemanggilan** | Rentan ambigu; compiler sering butuh anotasi turbofish `r.get::<User, DbError>(id)`. | Tidak ambigu; tipe kembalian otomatis terkunci pada `R::Item`. |
+
+> **Kaidah Praktis (Best Practice Rust):**
+> - Gunakan **Generic Trait (`trait Trait<T>`)** jika sebuah struct memang masuk akal memiliki banyak implementasi berbeda (contoh: trait `From<T>` di mana `String` bisa dibuat `From<&str>`, `From<u32>`, `From<char>`).
+> - Gunakan **Associated Types (`type Item;`)** jika hanya ada tepat satu tipe logis yang terikat pada struct pengimplementasi (contoh: `Iterator::Item` atau `Repository::Item`).
+
+---
+
+#### 2. Proyeksi Tipe (`R::Item` & `R::Error`) pada Trait Bounds
+
+Ketika membuat fungsi generic yang menerima suatu `Repository`, kita bisa merujuk langsung ke associated types milik implementor menggunakan sintaks `R::Item` atau `R::Error`:
+
+```rust
+pub fn fetch_and_display<R>(repo: &R, id: u64) -> Result<String, R::Error>
+where
+    R: Repository,
+    R::Item: Display, // Batasan: Tipe entitas harus bisa dicetak via {}
+{
+    match repo.get(id)? {
+        Some(item) => Ok(format!("Ditemukan: {item}")),
+        None => Ok(format!("Entity ID #{id} tidak ditemukan")),
+    }
+}
+```
+
+---
+
+#### 3. Kode Lengkap Terintegrasi (`src/fase7_task_4.rs`)
+
+```rust
+use std::collections::HashMap;
+use std::fmt::{self, Display, Formatter};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepoError {
+    NotFound(u64),
+    ConnectionFailed(String),
+}
+
+impl Display for RepoError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            RepoError::NotFound(id) => write!(f, "Entity dengan ID #{id} tidak ditemukan"),
+            RepoError::ConnectionFailed(msg) => write!(f, "Koneksi database gagal: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for RepoError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct User {
+    pub id: u64,
+    pub username: String,
+    pub email: String,
+}
+
+impl Display for User {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "User [ID: {}, Username: '{}', Email: '{}']", self.id, self.username, self.email)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Product {
+    pub id: u64,
+    pub name: String,
+    pub price: f64,
+}
+
+impl Display for Product {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Product [ID: {}, Name: '{}', Price: Rp{:.2}]", self.id, self.name, self.price)
+    }
+}
+
+pub trait Repository {
+    type Item;
     type Error;
 
-    fn get_by_id(&self, id: u64) -> Result<Option<Self::Item>, Self::Error>;
+    fn get(&self, id: u64) -> Result<Option<Self::Item>, Self::Error>;
 }
 
-// 2. Supertraits: trait yang membutuhkan implementasi trait lain
-pub trait Auditable: std::fmt::Debug + Clone {
-    fn audit_log(&self) -> String;
+// Implementasi 1: InMemoryUserRepository
+pub struct InMemoryUserRepository {
+    storage: HashMap<u64, User>,
 }
 
-// 3. Orphan Rule & Newtype Pattern
-// Aturan: Trait hanya boleh diimplementasikan jika Trait ATAU Tipe dibuat di crate lokal.
-// Jika ingin mengimplementasikan Trait eksternal ke Tipe eksternal, bungkus ke Tuple Struct baru (Newtype):
-pub struct CustomJson<T>(pub T);
+impl InMemoryUserRepository {
+    pub fn new() -> Self {
+        Self { storage: HashMap::new() }
+    }
+
+    pub fn insert(&mut self, user: User) {
+        self.storage.insert(user.id, user);
+    }
+}
+
+impl Repository for InMemoryUserRepository {
+    type Item = User;
+    type Error = RepoError;
+
+    fn get(&self, id: u64) -> Result<Option<Self::Item>, Self::Error> {
+        Ok(self.storage.get(&id).cloned())
+    }
+}
+
+// Implementasi 2: InMemoryProductRepository
+pub struct InMemoryProductRepository {
+    storage: HashMap<u64, Product>,
+}
+
+impl InMemoryProductRepository {
+    pub fn new() -> Self {
+        Self { storage: HashMap::new() }
+    }
+
+    pub fn insert(&mut self, product: Product) {
+        self.storage.insert(product.id, product);
+    }
+}
+
+impl Repository for InMemoryProductRepository {
+    type Item = Product;
+    type Error = RepoError;
+
+    fn get(&self, id: u64) -> Result<Option<Self::Item>, Self::Error> {
+        Ok(self.storage.get(&id).cloned())
+    }
+}
+
+// Implementasi 3: MockFaultyRepository (Simulasi Galat)
+pub struct MockFaultyRepository;
+
+impl Repository for MockFaultyRepository {
+    type Item = User;
+    type Error = RepoError;
+
+    fn get(&self, id: u64) -> Result<Option<Self::Item>, Self::Error> {
+        if id == 0 {
+            Err(RepoError::NotFound(0))
+        } else {
+            Err(RepoError::ConnectionFailed("Timeout server database mock".to_string()))
+        }
+    }
+}
+
+pub fn fetch_and_display<R>(repo: &R, id: u64) -> Result<String, R::Error>
+where
+    R: Repository,
+    R::Item: Display,
+{
+    match repo.get(id)? {
+        Some(item) => Ok(format!("Ditemukan: {item}")),
+        None => Ok(format!("Entity ID #{id} tidak ditemukan di repository")),
+    }
+}
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+============================================================
+=== Fase 7 - Task 4: Associated Types in Traits          ===
+============================================================
+
+1. InMemoryUserRepository (type Item = User):
+   - Direct get(1) : User [ID: 1, Username: 'alice_crypto', Email: 'alice@rust.dev']
+   - Direct get(99): None (Aman, data tidak ada)
+
+2. InMemoryProductRepository (type Item = Product):
+   - Direct get(101): Product [ID: 101, Name: 'Mechanical Keyboard 75%', Price: Rp1250000.00]
+
+3. Generic Function Menggunakan Proyeksi R::Item & R::Error:
+   - User Repo Query   -> Ditemukan: User [ID: 2, Username: 'bob_engineer', Email: 'bob@systems.id']
+   - Product Repo Query-> Ditemukan: Product [ID: 102, Name: 'Wireless Ergonomic Mouse', Price: Rp650000.00]
+   - Missing Item Query-> Entity ID #888 tidak ditemukan di repository
+
+4. Simulasi Error via MockFaultyRepository:
+   - ID 0 -> Error Ditangkap: Entity dengan ID #0 tidak ditemukan
+   - ID 100 -> Error Ditangkap: Koneksi database gagal: Timeout server database mock
 ```
 
 ---
 
-## FASE 8: Lifetimes Mendalam ('a)
+### 7.5 Newtype Pattern & Type Safety (Task 5)
 
-### 8.1 Filosofi Lifetime
-> **Prinsip Utama**: Anotasi lifetime (`'a`) **tidak mengubah atau memperpanjang masa hidup objek**. Anotasi lifetime hanyalah parameter penjelas bagi compiler untuk membuktikan hubungan ketergantungan masa hidup antara input dan output referensi agar pointer tidak menggantung (*dangling pointer*).
+Newtype Pattern adalah pola desain idiomatis di Rust di mana tipe primitif atau tipe eksternal dibungkus ke dalam **Tuple Struct dengan 1 elemen**.
 
-### 8.2 Anotasi Lifetime pada Fungsi & Struct
 ```rust
-// Compiler tahu bahwa slice kembalian memiliki masa hidup yang valid
-// selama 'a (irisan masa hidup terpendek antara s1 dan s2)
-fn find_prefix<'a>(s1: &'a str, s2: &'a str) -> &'a str {
-    if s1.len() > s2.len() { s1 } else { s2 }
+pub struct UserId(pub u64);
+pub struct OrderId(pub u64);
+```
+
+---
+
+#### 1. Mengapa Type Safety Jauh Lebih Baik daripada Memakai `u64` untuk Semuanya?
+
+Banyak developer pemula terjebak dalam anti-pattern **Primitive Obsession** (menggunakan tipe primitif mentah seperti `u64` atau `String` untuk segala jenis identitas data).
+
+##### A. Bahaya Nyata Primitive Obsession
+Bayangkan sebuah fungsi pemrosesan pesanan di sistem e-commerce:
+
+```rust
+// ❌ RAW PRIMITIVE (Rentan Human Error):
+fn process_order_unsafe(user_id: u64, order_id: u64) {
+    // ...
 }
 
-// Struct yang menyimpan referensi wajib dianotasi lifetime:
-// Struct Parser tidak boleh hidup lebih lama dari teks sumber `&'a str` yang dipegangnya!
+// Suatu hari, developer tidak sengaja menukar urutan argumen:
+let user_id = 42;
+let order_id = 100889;
+
+// Keduanya bertipe u64! Compiler Rust TIDAK AKAN mendeteksi error ini:
+process_order_unsafe(order_id, user_id); // ⚠️ BUG FATAL LOLOS KE PRODUCTION!
+```
+Dampaknya: User ID 100889 yang mungkin tidak bersalah didebet untuk pesanan ID 42!
+
+##### B. Solusi Newtype: Pencegahan Bug Mutlak di Waktu Kompilasi
+Dengan Newtype, `UserId` dan `OrderId` menjadi dua tipe yang **berbeda secara total** di mata compiler:
+
+```rust
+// ✅ TYPE-SAFE NEWTYPE:
+fn process_order_safe(user_id: UserId, order_id: OrderId) {
+    // ...
+}
+
+// Jika developer tidak sengaja menukar argumen:
+process_order_safe(order_id, user_id);
+// ❌ COMPILER ERROR:
+// expected `UserId`, found `OrderId`
+// expected `OrderId`, found `UserId`
+```
+> **Keuntungan Utama:** Bug tertangkap 100% oleh compiler saat Anda mengetik kode, bukan di runtime server production!
+
+---
+
+#### 2. Analisis Performa: Zero-Cost Abstraction
+
+Apakah pembungkusan struct ini memperlambat eksekusi aplikasi atau memboroskan memori? **Sama sekali tidak!**
+
+```rust
+assert_eq!(std::mem::size_of::<UserId>(), 8); // Sama persis dengan u64 (8 bytes)
+assert_eq!(std::mem::size_of::<OrderId>(), 8); // Sama persis dengan u64 (8 bytes)
+```
+
+Saat kompilasi optimasi (`cargo build --release`), compiler Rust menghapus lapisan struct Newtype dan menghasilkan kode mesin yang identik dengan manipulasi integer mentah. **Keamanan maksimal tanpa biaya runtime (*Zero-Cost Abstraction*)!**
+
+---
+
+#### 3. Manfaat Sekunder: Menembus Batasan *Orphan Rule*
+
+Rust menerapkan **Orphan Rule**: kita dilarang mengimplementasikan Trait pada suatu Tipe jika KEDUA-DUANYA berasal dari luar crate lokal kita (eksternal/std).
+
+Misalnya:
+- Trait `std::fmt::Display` (berasal dari `std`)
+- Tipe `Vec<String>` (berasal dari `std`)
+- Menulis `impl Display for Vec<String>` ❌ **Ditolak oleh compiler!**
+
+**Solusi dengan Newtype:** Bungkus `Vec<String>` ke dalam tuple struct lokal, lalu implementasikan `Display`:
+
+```rust
+pub struct TagList(pub Vec<String>);
+
+impl Display for TagList {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "[Tags: {}]", self.0.join(", "))
+    }
+}
+```
+
+---
+
+#### 4. Kode Lengkap Terintegrasi (`src/fase7_task_5.rs`)
+
+```rust
+use std::fmt::{self, Display, Formatter};
+use std::mem;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UserId(pub u64);
+
+impl UserId {
+    pub fn new(id: u64) -> Self { Self(id) }
+    pub fn raw(&self) -> u64 { self.0 }
+}
+
+impl Display for UserId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "USR-{:05}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OrderId(pub u64);
+
+impl OrderId {
+    pub fn new(id: u64) -> Self { Self(id) }
+    pub fn raw(&self) -> u64 { self.0 }
+}
+
+impl Display for OrderId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "ORD-{:06}", self.0)
+    }
+}
+
+// 1. Primitive Obsession vs Type Safety
+pub fn process_order_unsafe(user_id: u64, order_id: u64) -> String {
+    format!("Memproses pesanan ID #{order_id} untuk User #{user_id}")
+}
+
+pub fn process_order_safe(user_id: UserId, order_id: OrderId) -> String {
+    format!("Memproses pesanan {order_id} untuk User {user_id}")
+}
+
+// 2. Bypass Orphan Rule via Newtype
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagList(pub Vec<String>);
+
+impl Display for TagList {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let joined = self.0.join(", ");
+        write!(f, "[Tags: {joined}]")
+    }
+}
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+============================================================
+=== Fase 7 - Task 5: Newtype Pattern & Type Safety       ===
+============================================================
+
+1. Mengapa Type Safety Lebih Baik daripada Raw u64?
+   a. Versi Rentan (u64):
+      * Argumen benar : Memproses pesanan ID #100889 untuk User #42
+      * Argumen tertukar: Memproses pesanan ID #42 untuk User #100889 ❌ (Bug semantik lolos tanpa error!)
+
+   b. Versi Type-Safe (Newtype):
+      * Eksekusi aman : Memproses pesanan ORD-100889 untuk User USR-00042 ✓
+      * Jika dibalik `process_order_safe(order_id, user_id)`: Ditolak total oleh compiler!
+
+2. Analisis Ukuran Memori (Zero-Cost Abstraction):
+   - Ukuran u64 mentah      : 8 bytes
+   - Ukuran UserId (Newtype): 8 bytes
+   - Ukuran OrderId (Newtype): 8 bytes
+   -> Kesimpulan: Newtype memiliki runtime cost = 0! Pembungkus lenyap saat kompilasi.
+
+3. Bypass Orphan Rule via Newtype (Display untuk Vec<String>):
+   - Cetak TagList terformat via Display: [Tags: rust, type-safety, newtype, zero-cost]
+```
+
+
+---
+
+### 7.6 Mini Project Fase 7 — Repository Abstraction Pattern
+
+Mini Project ini mengintegrasikan seluruh materi utama Fase 7: **Trait Abstraction**, **Associated Types**, **Static vs Dynamic Dispatch**, serta **Newtype Pattern**.
+
+```text
+       ┌────────────────────────┐
+       │    Repository Trait    │  (Kontrak Abstraksi dengan Associated Types)
+       └───────────┬────────────┘
+                   │
+         ┌─────────┴─────────┐
+         ▼                   ▼
+┌──────────────────┐ ┌──────────────────┐
+│ InMemoryAccount- │ │   MockAccount-   │
+│    Repository    │ │    Repository    │  (Digunakan untuk unit testing & isolasi error)
+└──────────────────┘ └──────────────────┘
+```
+
+---
+
+#### 1. Arsitektur Repository Pattern dengan Associated Types
+
+Trait `Repository` mendefinisikan operasi standar persistence data:
+
+```rust
+pub trait Repository {
+    type Item;
+    type Id;
+    type Error: std::error::Error;
+
+    fn save(&mut self, item: Self::Item) -> Result<(), Self::Error>;
+    fn find_by_id(&self, id: &Self::Id) -> Result<Option<Self::Item>, Self::Error>;
+    fn delete(&mut self, id: &Self::Id) -> Result<bool, Self::Error>;
+    fn list_all(&self) -> Result<Vec<Self::Item>, Self::Error>;
+}
+```
+
+1. **`InMemoryAccountRepository`**: Menggunakan `HashMap<AccountId, Account>` untuk penyimpanan data sementara di memori lokal secara aman dan cepat.
+2. **`MockAccountRepository`**: Digunakan untuk pengujian (*unit testing*), mampu disimulasikan skenario kegagalan I/O (`should_fail_on_save`) tanpa menyentuh storage sungguhan.
+3. **Consumers**:
+   - `audit_repository_static<R: Repository>(repo: &R)`: Static Dispatch (Monomorphized, Zero-Cost).
+   - `audit_repository_dynamic(repo: &dyn Repository)`: Dynamic Dispatch (vtable fat pointer).
+
+---
+
+#### 2. Evaluasi 4 Kriteria Lulus Fase 7
+
+1. **Generic vs Trait**:
+   - *Generic* (`<T>`) adalah parameter tipe abstrak yang memungkinkan fungsi/struct bekerja untuk tipe apa pun.
+   - *Trait* adalah kontrak perilaku (*behavior interface*) yang membatasi kapabilitas apa yang harus dimiliki oleh tipe tersebut.
+2. **Static vs Dynamic Dispatch**:
+   - *Static Dispatch* (`T: Trait`): Diputuskan saat kompilasi via monomorphization. Kecepatan maksimal, bisa di-inline compiler.
+   - *Dynamic Dispatch* (`dyn Trait`): Diputuskan saat runtime via vtable fat pointer (16 bytes). Mendukung polimorfisme heterogen (`Vec<Box<dyn Trait>>`).
+3. **Associated Types**:
+   - Menghubungkan tipe entitas dan error secara 1-ke-1 langsung pada struct pengimplementasi (`type Item = Account; type Id = AccountId; type Error = RepositoryError;`), menghasilkan signature fungsi yang bersih tanpa polusi parameter generic.
+4. **Orphan Rule & Newtype**:
+   - Membungkus tipe primitif `u64` ke dalam tuple struct Newtype `AccountId(pub u64)` untuk mencegah bug tertukarnya parameter ID (*Primitive Obsession*) sekaligus membuka jalan implementasi trait eksternal secara legal.
+
+---
+
+#### 3. Kode Lengkap Terintegrasi (`src/mini_project_7.rs`)
+
+```rust
+use std::collections::HashMap;
+use std::fmt::{self, Display, Formatter};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AccountId(pub u64);
+
+impl Display for AccountId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "ACC-{:05}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Account {
+    pub id: AccountId,
+    pub holder: String,
+    pub balance: f64,
+    pub is_active: bool,
+}
+
+impl Display for Account {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let status = if self.is_active { "AKTIF" } else { "NONAKTIF" };
+        write!(
+            f,
+            "[{}] {} | Saldo: Rp{:.2} | Status: {}",
+            self.id, self.holder, self.balance, status
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepositoryError {
+    NotFound(String),
+    Duplicate(String),
+    StorageFailure(String),
+}
+
+impl Display for RepositoryError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            RepositoryError::NotFound(msg) => write!(f, "[Error 404] Entitas tidak ditemukan: {msg}"),
+            RepositoryError::Duplicate(msg) => write!(f, "[Error 409] Duplikasi entitas: {msg}"),
+            RepositoryError::StorageFailure(msg) => write!(f, "[Error 500] Kegagalan storage: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for RepositoryError {}
+
+pub trait Repository {
+    type Item;
+    type Id;
+    type Error: std::error::Error;
+
+    fn save(&mut self, item: Self::Item) -> Result<(), Self::Error>;
+    fn find_by_id(&self, id: &Self::Id) -> Result<Option<Self::Item>, Self::Error>;
+    fn delete(&mut self, id: &Self::Id) -> Result<bool, Self::Error>;
+    fn list_all(&self) -> Result<Vec<Self::Item>, Self::Error>;
+}
+
+// 1. InMemory Implementation
+pub struct InMemoryAccountRepository {
+    data: HashMap<AccountId, Account>,
+}
+
+impl InMemoryAccountRepository {
+    pub fn new() -> Self { Self { data: HashMap::new() } }
+    pub fn find_or_err(&self, id: &AccountId) -> Result<Account, RepositoryError> {
+        self.find_by_id(id)?
+            .ok_or_else(|| RepositoryError::NotFound(format!("Akun {id} tidak ditemukan")))
+    }
+}
+
+impl Repository for InMemoryAccountRepository {
+    type Item = Account;
+    type Id = AccountId;
+    type Error = RepositoryError;
+
+    fn save(&mut self, item: Self::Item) -> Result<(), Self::Error> {
+        if self.data.contains_key(&item.id) {
+            return Err(RepositoryError::Duplicate(format!("Akun dengan ID {} sudah ada", item.id)));
+        }
+        self.data.insert(item.id, item);
+        Ok(())
+    }
+
+    fn find_by_id(&self, id: &Self::Id) -> Result<Option<Self::Item>, Self::Error> {
+        Ok(self.data.get(id).cloned())
+    }
+
+    fn delete(&mut self, id: &Self::Id) -> Result<bool, Self::Error> {
+        Ok(self.data.remove(id).is_some())
+    }
+
+    fn list_all(&self) -> Result<Vec<Self::Item>, Self::Error> {
+        let mut list: Vec<Account> = self.data.values().cloned().collect();
+        list.sort_by_key(|a| a.id);
+        Ok(list)
+    }
+}
+
+// 2. Mock Implementation (Simulasi Failure)
+pub struct MockAccountRepository {
+    pub accounts: HashMap<AccountId, Account>,
+    pub should_fail_on_save: bool,
+    pub failure_message: String,
+}
+
+impl MockAccountRepository {
+    pub fn with_simulated_failure(failure_message: &str) -> Self {
+        Self {
+            accounts: HashMap::new(),
+            should_fail_on_save: true,
+            failure_message: failure_message.to_string(),
+        }
+    }
+}
+
+impl Repository for MockAccountRepository {
+    type Item = Account;
+    type Id = AccountId;
+    type Error = RepositoryError;
+
+    fn save(&mut self, item: Self::Item) -> Result<(), Self::Error> {
+        if self.should_fail_on_save {
+            return Err(RepositoryError::StorageFailure(self.failure_message.clone()));
+        }
+        self.accounts.insert(item.id, item);
+        Ok(())
+    }
+
+    fn find_by_id(&self, id: &Self::Id) -> Result<Option<Self::Item>, Self::Error> {
+        Ok(self.accounts.get(id).cloned())
+    }
+
+    fn delete(&mut self, id: &Self::Id) -> Result<bool, Self::Error> {
+        Ok(self.accounts.remove(id).is_some())
+    }
+
+    fn list_all(&self) -> Result<Vec<Self::Item>, Self::Error> {
+        Ok(self.accounts.values().cloned().collect())
+    }
+}
+
+// 3. Consumers (Static & Dynamic Dispatch)
+pub fn audit_repository_static<R>(repo: &R) -> Result<String, R::Error>
+where
+    R: Repository<Item = Account, Id = AccountId>,
+{
+    let accounts = repo.list_all()?;
+    let total_balance: f64 = accounts.iter().map(|a| a.balance).sum();
+    Ok(format!("[Audit Static] Total Akun: {} | Total Aset: Rp{:.2}", accounts.len(), total_balance))
+}
+
+pub fn audit_repository_dynamic(
+    repo: &dyn Repository<Item = Account, Id = AccountId, Error = RepositoryError>,
+) -> Result<String, RepositoryError> {
+    let accounts = repo.list_all()?;
+    let active_count = accounts.iter().filter(|a| a.is_active).count();
+    Ok(format!("[Audit Dynamic] Akun Aktif: {} dari total {}", active_count, accounts.len()))
+}
+```
+
+##### Hasil Eksekusi Output Terminal:
+```text
+============================================================
+=== Mini Project Fase 7: Repository Abstraction Pattern  ===
+============================================================
+
+1. Mengoperasikan InMemoryAccountRepository:
+   [+] Berhasil menyimpan 3 akun ke in-memory storage.
+   [✓] Query Akun #102 (find_by_id): [ACC-00102] Siti Rahma | Saldo: Rp27500000.00 | Status: AKTIF
+   [✓] Query Akun #999 (find_or_err): [Error 404] Entitas tidak ditemukan: Akun ACC-00999 tidak ditemukan
+   [✓] Deteksi Duplikasi ID: [Error 409] Duplikasi entitas: Akun dengan ID ACC-00101 sudah ada
+
+2. Evaluasi Dispatch pada Service Audit:
+   - [Audit Static] Total Akun: 3 | Total Aset: Rp43000000.00
+   - [Audit Dynamic] Akun Aktif: 2 dari total 3
+
+3. Demonstrasi MockAccountRepository (Simulasi Failure):
+   [✓] Sukses Menangkap Simulasi Error: [Error 500] Kegagalan storage: Koneksi Database Timeout
+
+4. Operasi Modifikasi (Delete & List All):
+   - Hapus Akun #103: Status = true
+   - Sisa Akun di InMemory Storage:
+     * [ACC-00101] Ahmad Dahlan | Saldo: Rp15000000.00 | Status: AKTIF
+     * [ACC-00102] Siti Rahma | Saldo: Rp27500000.00 | Status: AKTIF
+
+5. Evaluasi Kriteria Lulus Fase 7:
+   [x] Generic vs Trait: Generics adalah parameter tipe abstrak; Trait adalah kontrak antarmuka.
+   [x] Static vs Dynamic: Static = Monomorphized (Zero-Cost); Dynamic = vtable fat pointer.
+   [x] Associated Types: Repository::Item, Id, & Error terikat 1-to-1 pada struct.
+   [x] Orphan Rule & Newtype: AccountId tuple struct memberikan type safety dan enkapsulasi.
+```
+
+
+
+---
+
+## FASE 8: Lifetimes Mendalam ('a, Structs, Impls, Elision Rules, 'static)
+
+### 8.1 Filosofi Lifetime & Peran Simbol `'a`
+> **Prinsip Utama**: Anotasi lifetime (`'a`) **TIDAK MENGUBAH atau MEMPERPANJANG masa hidup objek**. 
+> Anotasi lifetime hanyalah **parameter deskriptif bagi borrow checker compiler** untuk memvalidasi hubungan ketergantungan masa hidup antara referensi input dan referensi output. Tujuannya adalah membuktikan secara matematis saat kompilasi bahwa tidak akan pernah terjadi pointer menggantung (*dangling reference*) saat runtime.
+
+Dalam Rust, setiap referensi memiliki *lifetime* (rentang kode di mana referensi tersebut valid). Sering kali compiler dapat menginferensikannya secara otomatis (*lifetime elision*), namun ketika ada ambiguitas (misalnya fungsi menerima 2 referensi dan mengembalikan 1 referensi), compiler menuntut kita untuk menyatakan hubungan lifetime secara eksplisit.
+
+#### 1. Masalah Nyata yang Ingin Dicegah: "Kertas Alamat & Rumah Kosong"
+Di bahasa pemrograman seperti C/C++, ada bahaya besar bernama **Dangling Pointer** (penunjuk menggantung):
+1. Bayangkan Anda punya selembar kertas bertuliskan alamat rumah teman: `Jl. Mawar No. 10`. Kertas ini adalah **Referensi (`&`)**.
+2. Suatu hari, rumah teman Anda digusur dan rata dengan tanah (datanya di-drop/dihapus dari RAM).
+3. Anda tidak tahu kalau rumahnya sudah tiada. Anda nekat mendatangi alamat itu lalu masuk.
+4. **Akibatnya**: *Crash*, memori rusak (*segmentation fault*), atau celah keamanan dieksploitasi hacker.
+
+Rust membuat aturan mutlak: **Referensi (`&`) tidak boleh menunjuk ke data yang sudah mati.**
+
+---
+
+#### 2. Kenapa Butuh Tanda Kurung Lancip `<>` Seperti Generic?
+Alasannya sederhana: **Karena Lifetime memang SEBENARNYA ADALAH GENERIC.**  
+Dalam dokumentasi resmi Rust, istilah resminya adalah **"Generic Lifetime Parameter"**.
+
+Mari bandingkan langsung antara **Generic Tipe (`<T>`)** dengan **Generic Lifetime (`<'a>`)**:
+
+| Aspek Perbandingan | Generic Tipe (`<T>`) | Generic Lifetime (`<'a>`) |
+| :--- | :--- | :--- |
+| **Apa yang belum diketahui saat nulis fungsi?** | **Tipe datanya** (apakah `i32`, `String`, atau `bool`). | **Lama masa hidup datanya** (apakah hidup 5 baris, 1 blok fungsi, atau sepanjang program). |
+| **Fungsi deklarasi `<...>`** | Mendaftarkan *placeholder* (variabel pengganti) untuk **tipe**. | Mendaftarkan *placeholder* (variabel pengganti) untuk **scope / masa hidup**. |
+| **Kapan nilainya ditentukan?** | Saat pemanggil memasukkan tipe konkret: `cetak::<i32>(5)`. | Saat pemanggil memasukkan referensi dengan scope nyata: `longest(&s1, &s2)`. |
+
+##### Mengapa Harus Didaftarkan Dulu di Dalam `<>`?
+Persis seperti variabel biasa, compiler tidak tahu siapa `'a` jika tidak dideklarasikan terlebih dahulu:
+- Jika kita tulis `fn cetak(nilai: T)` tanpa `<T>`, compiler akan protes:  
+  `error: cannot find type 'T' in this scope`.
+- Hal serupa terjadi pada lifetime: jika kita tulis `fn longest(x: &'a str) -> &'a str` tanpa `<'a>`, compiler akan protes:  
+  `error: use of undeclared lifetime name ''a'`.
+
+Maka tanda `<'a>` berfungsi sebagai deklarasi: *"Halo compiler, siapkan placeholder nama `'a` untuk menampung rentang waktu referensi yang dipinjam nanti!"*
+
+##### Kenapa Pakai Tanda Petik Tunggal (`'`)?
+Tanda petik tunggal (`'`) dipakai agar compiler dan programmer bisa **membedakan mana Tipe dan mana Lifetime** ketika keduanya digabung di dalam kurung lancip yang sama:
+```rust
+// Menerima placeholder lifetime 'a DAN placeholder tipe T:
+fn proses_item<'a, T>(item: &'a T) {
+    // ...
+}
+```
+Tanpa petik tunggal (`<a, T>`), compiler akan menganggap `a` sebagai tipe struct, bukan rentang waktu.
+
+##### Nama `'a` Itu Bebas, Seperti Nama Variabel!
+Simbol `'a` bukan kata kunci rahasia bawaan sistem. Sama halnya seperti Anda bebas menamai tipe generic dengan `<T>`, `<Item>`, atau `<Data>`, Anda juga bebas menamai lifetime:
+```rust
+// Ini 100% valid dan sah di Rust:
+fn longest<'waktu_hidup>(x: &'waktu_hidup str, y: &'waktu_hidup str) -> &'waktu_hidup str {
+    if x.len() >= y.len() { x } else { y }
+}
+```
+Programmer Rust menggunakan nama pendek seperti `'a`, `'b` semata-mata karena ringkas dan cepat diketik (mirip seperti menamai variabel loop `for i in 0..10`).
+
+---
+
+#### 3. Dua Analogi Sederhana untuk Memahami Lifetime Tanpa Pusing
+
+##### Analogi 1: Tiket Wahana Bermain (Fungsi dengan Lifetime)
+- Anda (`string1`) punya tiket wahana bermain berlaku sampai jam **17:00**.
+- Teman Anda (`string2`) punya tiket anak-anak setengah hari berlaku sampai jam **12:00**.
+- Kalian memesan paket foto bersama berdua (`longest(&string1, &string2)`).
+- **Pertanyaan**: Sampai jam berapa paket foto bersama itu sah dianggap turis aktif di dalam wahana?
+- **Jawabannya**: **Jam 12:00!** Karena setelah jam 12:00, teman Anda sudah pulang (datanya musnah).
+- **Peran `'a`**: Tulisan `'a` memberi tahu penjaga gerbang (compiler): *"Paket ini gugur saat orang pertama pulang."* Menulis `'a` **tidak bisa** memperpanjang tiket teman Anda sampai jam 17:00.
+
+##### Analogi 2: Pembatas Buku di Perpustakaan (Struct dengan Referensi)
+```rust
+struct Parser<'a> {
+    source: &'a str,
+}
+```
+- `source` adalah buku fisik yang Anda pinjam dari perpustakaan.
+- `Parser` adalah pembatas buku yang Anda selipkan di dalam buku tersebut.
+- Jika buku perpustakaan itu sudah Anda kembalikan ke rak perpustakaan, pembatas buku Anda tidak ada gunanya lagi di meja kosong.
+- Tanda `'a` pada struct memastikan bahwa: **Instance struct `Parser` TIDAK BOLEH hidup lebih lama daripada buku teks (`source`) yang sedang dipinjamnya.**
+
+---
+
+### 8.2 Fungsi dengan Lifetime & Multiple Lifetime Parameters
+
+#### 1. Dasar Anotasi Fungsi: `longest<'a>`
+```rust
+pub fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() >= y.len() {
+        x
+    } else {
+        y
+    }
+}
+```
+- **Mengapa butuh `'a`?**: Compiler mengevaluasi fungsi secara terisolasi tanpa melihat konteks pemanggilnya. Compiler tidak tahu apakah cabang `if` atau `else` yang akan dieksekusi saat runtime.
+- **Arti `'a` pada return**: Referensi yang dikembalikan dijamin valid selama **irisan masa hidup terpendek (minimum overlap)** antara `x` dan `y`.
+
+#### 2. Eksperimen: `first<'a>`
+```rust
+pub fn first<'a>(a: &'a str, _b: &'a str) -> &'a str {
+    a
+}
+```
+Meskipun `_b` menerima anotasi `'a'`, nilai kembalian murni berasal dari `a`. Namun karena `_b` beranotasi `'a'`, masa hidup kembalian tetap terikat pada durasi `_b`. Untuk membebaskannya, gunakan multiple lifetime parameter!
+
+#### 3. Multiple Lifetime Parameters (`'a` dan `'b`)
+```rust
+pub fn choose_first_with_context<'a, 'b>(primary: &'a str, context: &'b str) -> &'a str {
+    let _log = format!("[Context: {context}]");
+    primary
+}
+```
+- Jika kita memaksakan satu lifetime `'a` untuk `primary` dan `context`, maka masa hidup kembalian akan dibatasi oleh argumen yang paling cepat di-drop.
+- Dengan memisahkan `'a` dan `'b`, argumen `context` boleh berasal dari inner scope yang sangat pendek tanpa membatasi masa berlaku referensi kembalian `primary`.
+
+---
+
+### 8.3 Struct Menyimpan Reference & Blok Implementasi (`impl<'a>`)
+
+#### 1. Reference Sebagai Field Struct
+Jika struct menyimpan referensi (bukan owned type seperti `String`), struct **wajib** mencantumkan parameter lifetime:
+```rust
+#[derive(Debug, PartialEq, Eq)]
 pub struct Parser<'a> {
     pub source: &'a str,
     pub cursor: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Excerpt<'a> {
+    pub part: &'a str,
+}
+```
+**Aturan Emas**: Instance struct `Parser<'a>` **TIDAK BOLEH hidup lebih lama** dari string asli yang direferensikan oleh field `source`.
+
+#### 2. Lifetime pada Blok `impl<'a>`
+```rust
 impl<'a> Parser<'a> {
     pub fn new(source: &'a str) -> Self {
         Self { source, cursor: 0 }
     }
+
+    pub fn next_token(&mut self) -> Option<&'a str> {
+        let remaining = &self.source[self.cursor..];
+        let trimmed = remaining.trim_start();
+        let leading_spaces = remaining.len() - trimmed.len();
+        self.cursor += leading_spaces;
+
+        if self.cursor >= self.source.len() {
+            return None;
+        }
+
+        let slice = &self.source[self.cursor..];
+        let token_len = slice.find(char::is_whitespace).unwrap_or(slice.len());
+        let token = &slice[..token_len];
+        self.cursor += token_len;
+        Some(token)
+    }
+
+    pub fn peek(&self) -> Option<char> {
+        self.source[self.cursor..].chars().next()
+    }
+
+    pub fn announce_and_get_excerpt(&self, announcement: &str) -> &'a str {
+        let _msg = format!("[INFO]: {announcement}");
+        self.source
+    }
+}
+```
+- Deklarasi `impl<'a>` mendefinisikan generic lifetime parameter `'a`.
+- `Parser<'a>` menyatakan bahwa method diimplementasikan untuk struct yang memiliki lifetime `'a`.
+
+---
+
+### 8.4 Tiga Aturan Lifetime Elision (Otomatisasi Kompiler)
+
+Compiler Rust menerapkan **3 Aturan Elision** secara berurutan. Jika setelah menerapkan ketiga aturan ini compiler masih belum bisa menentukan lifetime dari referensi return type, kompilasi akan gagal dan menuntut anotasi manual:
+
+1. **Aturan 1 (Setiap Input Mendapat Lifetime Unik)**:  
+   Setiap parameter referensi input diberi parameter lifetime tersendiri:
+   `fn foo(x: &str, y: &str)` ekuivalen dengan `fn foo<'a, 'b>(x: &'a str, y: &'b str)`.
+2. **Aturan 2 (Satu Input Reference Menjadi Output Reference)**:  
+   Jika hanya ada tepat satu input reference, lifetime tersebut otomatis diberikan ke semua referensi output:  
+   `fn first_word(s: &str) -> &str` ekuivalen dengan `fn first_word<'a>(s: &'a str) -> &'a str`.
+3. **Aturan 3 (Metode dengan `&self` Mengikat Output ke `self`)**:  
+   Jika ada beberapa input reference dan salah satunya adalah `&self` atau `&mut self`, maka lifetime dari `self` otomatis diberikan ke semua referensi output.
+
+---
+
+### 8.5 Lifetime Khusus: `'static` (Literal vs Trait Bound)
+
+Ada dua penggunaan utama `'static`:
+1. **Referensi `'static` (`&'static T`)**:  
+   Data hidup sepanjang seluruh eksekusi program. Contohnya adalah string literal (`"Hello"`), yang tersimpan permanen di segmen data binary executable.
+2. **Trait Bound `'static` (`T: 'static`)**:  
+   Artinya tipe `T` **bebas dari referensi non-static**. Tipe yang memiliki data sendiri (seperti `String`, `i32`, `Vec<u8>`) memenuhi syarat `T: 'static'` karena tidak ada kemungkinan referensinya menjadi invalid sewaktu-waktu.
+
+```rust
+pub const GLOBAL_SYSTEM_NAME: &'static str = "RUST_LEARNING_SYSTEM_V2";
+
+pub fn verify_static_bound<T: Display + 'static>(val: T) -> String {
+    format!("[Static Validated]: {val}")
 }
 ```
 
-### 8.3 Tiga Aturan Lifetime Elision (Otomatisasi Compiler)
-Compiler menginferensikan lifetime secara otomatis tanpa perlu ditulis manual jika:
-1. Setiap parameter referensi mendapatkan parameter lifetime unik tersendiri.
-2. Jika hanya ada tepat 1 parameter referensi input, lifetime input tersebut otomatis dipasangkan ke semua referensi output.
-3. Jika terdapat parameter `&self` atau `&mut self` pada method, lifetime `self` otomatis dipasangkan ke semua referensi output.
+---
 
+### 8.6 Kombinasi Tingkat Lanjut: Generics + Lifetime & Trait + Lifetime
+
+#### 1. Generic Tipe + Lifetime
+```rust
+#[derive(Debug)]
+pub struct AnnotatedItem<'a, T> {
+    pub item: &'a T,
+    pub note: &'a str,
+}
+
+pub fn find_first_match<'a, T: PartialEq>(items: &'a [T], target: &T) -> Option<&'a T> {
+    for item in items {
+        if item == target {
+            return Some(item);
+        }
+    }
+    None
+}
+
+pub fn longest_with_announcement<'a, T: Display>(x: &'a str, y: &'a str, ann: T) -> &'a str {
+    let _log = format!("Pengumuman: {ann}");
+    if x.len() >= y.len() { x } else { y }
+}
+```
+
+#### 2. Trait + Lifetime
+```rust
+pub trait TextTokenizer<'a> {
+    fn tokenize(&'a mut self) -> Vec<&'a str>;
+}
+
+pub trait Highlightable<'a> {
+    fn get_highlight(&self) -> &'a str;
+}
+```
+
+---
+
+### 8.7 Eksperimen Dangling Reference & Analisis Borrow Checker
+
+#### Kasus Error 1: Mengembalikan Referensi Data Lokal
+```rust
+// ❌ DITOLAK COMPILER:
+fn create_dangling() -> &str {
+    let s = String::from("halo lokal");
+    &s // ERROR: returns a value referencing data owned by the current function
+}
+```
+- **Error**: `s` di-drop dari Stack begitu fungsi selesai dieksekusi. Mengembalikan `&s` akan menciptakan dangling pointer.
+- **Solusi Tanpa `.clone()`**: Kembalikan owned `String` secara langsung, menyerahkan kepemilikan utuh ke pemanggil.
+
+#### Kasus Error 2: Struct Menyimpan Referensi Variabel Scope Sempit
+```rust
+// ❌ DITOLAK COMPILER:
+let parser: Parser;
+{
+    let temporary_string = String::from("data sementara");
+    parser = Parser { source: &temporary_string, cursor: 0 };
+} // temporary_string di-drop di sini!
+println!("{:?}", parser.source); // ERROR: `temporary_string` does not live long enough
+```
+- **Error**: Variabel `temporary_string` musnah sebelum `parser` selesai digunakan.
+- **Solusi Tanpa `.clone()`**: Deklarasikan data sumber di scope yang setara atau lebih luas dari struct `parser`.
+
+---
+
+### 8.8 Kode Lengkap Terintegrasi (`src/fase8_task_1.rs`)
+
+```rust
+// Fase 8 - Task 1: Lifetimes Mendalam ('a, Structs, Impls, Elision Rules, 'static)
+// Rujukan: rust_learning_guide.md (Sub-bab 8.1 - 8.9) & rust_execution_tasks.md (L728-L773)
+
+use std::fmt::{self, Debug, Display, Formatter};
+
+// 1. Dasar Lifetime: fn longest<'a>(...) & Eksperimen first<'a>(...)
+pub fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() >= y.len() {
+        x
+    } else {
+        y
+    }
+}
+
+pub fn first<'a>(a: &'a str, _b: &'a str) -> &'a str {
+    a
+}
+
+// 2. Multiple Lifetime Parameters ('a dan 'b)
+pub fn choose_first_with_context<'a, 'b>(primary: &'a str, context: &'b str) -> &'a str {
+    let _log = format!("[Context: {context}]");
+    primary
+}
+
+// 3. Lifetime pada Struct & Reference sebagai Field
+#[derive(Debug, PartialEq, Eq)]
+pub struct Parser<'a> {
+    pub source: &'a str,
+    pub cursor: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Excerpt<'a> {
+    pub part: &'a str,
+}
+
+// 4. Lifetime pada Blok Implementasi (impl<'a>)
+impl<'a> Parser<'a> {
+    pub fn new(source: &'a str) -> Self {
+        Self { source, cursor: 0 }
+    }
+
+    pub fn next_token(&mut self) -> Option<&'a str> {
+        let remaining = &self.source[self.cursor..];
+        let trimmed = remaining.trim_start();
+        let leading_spaces = remaining.len() - trimmed.len();
+        self.cursor += leading_spaces;
+
+        if self.cursor >= self.source.len() {
+            return None;
+        }
+
+        let slice = &self.source[self.cursor..];
+        let token_len = slice.find(char::is_whitespace).unwrap_or(slice.len());
+        let token = &slice[..token_len];
+        self.cursor += token_len;
+        Some(token)
+    }
+
+    pub fn peek(&self) -> Option<char> {
+        self.source[self.cursor..].chars().next()
+    }
+
+    pub fn announce_and_get_excerpt(&self, announcement: &str) -> &'a str {
+        let _msg = format!("[INFO]: {announcement}");
+        self.source
+    }
+}
+
+// 5. Pembuktian 3 Aturan Lifetime Elision
+pub fn first_word(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    for (i, &byte) in bytes.iter().enumerate() {
+        if byte == b' ' {
+            return &s[0..i];
+        }
+    }
+    s
+}
+
+pub fn first_word_explicit<'a>(s: &'a str) -> &'a str {
+    let bytes = s.as_bytes();
+    for (i, &byte) in bytes.iter().enumerate() {
+        if byte == b' ' {
+            return &s[0..i];
+        }
+    }
+    s
+}
+
+// 6. Lifetime Khusus: 'static
+pub const GLOBAL_SYSTEM_NAME: &'static str = "RUST_LEARNING_SYSTEM_V2";
+
+pub fn verify_static_bound<T: Display + 'static>(val: T) -> String {
+    format!("[Static Validated]: {val}")
+}
+
+// 7. Generic Tipe + Lifetime
+#[derive(Debug)]
+pub struct AnnotatedItem<'a, T> {
+    pub item: &'a T,
+    pub note: &'a str,
+}
+
+impl<'a, T: Display> Display for AnnotatedItem<'a, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{} (Catatan: {})", self.item, self.note)
+    }
+}
+
+pub fn find_first_match<'a, T: PartialEq>(items: &'a [T], target: &T) -> Option<&'a T> {
+    for item in items {
+        if item == target {
+            return Some(item);
+        }
+    }
+    None
+}
+
+pub fn longest_with_announcement<'a, T: Display>(x: &'a str, y: &'a str, ann: T) -> &'a str {
+    let _log = format!("Pengumuman: {ann}");
+    if x.len() >= y.len() {
+        x
+    } else {
+        y
+    }
+}
+
+// 8. Trait + Lifetime
+pub trait TextTokenizer<'a> {
+    fn tokenize(&'a mut self) -> Vec<&'a str>;
+}
+
+impl<'a> TextTokenizer<'a> for Parser<'a> {
+    fn tokenize(&'a mut self) -> Vec<&'a str> {
+        let mut tokens = Vec::new();
+        while let Some(tok) = self.next_token() {
+            tokens.push(tok);
+        }
+        tokens
+    }
+}
+
+pub trait Highlightable<'a> {
+    fn get_highlight(&self) -> &'a str;
+}
+
+impl<'a> Highlightable<'a> for Excerpt<'a> {
+    fn get_highlight(&self) -> &'a str {
+        self.part
+    }
+}
+
+// 9. Eksperimen Dangling Reference & Solusi
+pub fn safe_lifetime_retention(source: &str, start: usize, len: usize) -> Option<&str> {
+    if start + len <= source.len() {
+        Some(&source[start..start + len])
+    } else {
+        None
+    }
+}
+
+// Demonstrator Runner
+pub fn run() {
+    println!("============================================================");
+    println!("=== Fase 8: Lifetimes Mendalam ('a, Struct, Impl, Static) ===");
+    println!("============================================================");
+
+    // 1. fn longest<'a> & first<'a>
+    println!("\n1. Demonstrasi fn longest<'a> dan first<'a>:");
+    let string1 = String::from("Bahasa Pemrograman Rust");
+    let string2 = "Modern 2024";
+    let result_longest = longest(&string1, string2);
+    let result_first = first(&string1, string2);
+    println!("   - String 1        : \"{string1}\" (len: {})", string1.len());
+    println!("   - String 2        : \"{string2}\" (len: {})", string2.len());
+    println!("   - Hasil longest() : \"{result_longest}\"");
+    println!("   - Hasil first()   : \"{result_first}\"");
+
+    // 2. Multiple Lifetime Parameters ('a, 'b)
+    println!("\n2. Multiple Lifetime Parameters ('a, 'b):");
+    let primary_doc = String::from("Dokumen Rahasia Negara");
+    let selected_doc;
+    {
+        let short_lived_context = String::from("Audit Sesi #8812");
+        selected_doc = choose_first_with_context(&primary_doc, &short_lived_context);
+        println!("   - Konteks aktif di inner scope: \"{short_lived_context}\"");
+    }
+    println!("   - Hasil di outer scope: \"{selected_doc}\" ✓ (Bebas dari batasan masa hidup konteks)");
+
+    // 3. Lifetime pada Struct dan Impl (Parser<'a>)
+    println!("\n3. Lifetime pada Struct dan Impl (Parser<'a>):");
+    let raw_payload = String::from("POST /api/v1/auth/login HTTP/1.1");
+    let mut parser = Parser::new(&raw_payload);
+    println!("   - Sumber Teks      : \"{}\"", parser.source);
+    println!("   - Token 1 (Method) : {:?}", parser.next_token().unwrap());
+    println!("   - Token 2 (Path)   : {:?}", parser.next_token().unwrap());
+    println!("   - Token 3 (Proto)  : {:?}", parser.next_token().unwrap());
+    println!("   - Token 4 (Habis)  : {:?}", parser.next_token());
+    println!("   - Peek sisa string : {:?}", parser.peek());
+    println!("   - Method announce  : \"{}\"", parser.announce_and_get_excerpt("Parsing Header OK"));
+
+    // 4. Pembuktian Tiga Aturan Lifetime Elision
+    println!("\n4. Pembuktian Tiga Aturan Lifetime Elision:");
+    let phrase = "Zero-Cost Abstraction in Rust";
+    let elided_res = first_word(phrase);
+    let explicit_res = first_word_explicit(phrase);
+    println!("   - Frasa Asli       : \"{phrase}\"");
+    println!("   - first_word (Elision Rule 1 & 2): \"{elided_res}\"");
+    println!("   - first_word_explicit          : \"{explicit_res}\"");
+
+    // 5. Analisis Lifetime 'static
+    println!("\n5. Analisis Lifetime 'static:");
+    println!("   - Konstanta Binary Global       : \"{GLOBAL_SYSTEM_NAME}\" (&'static str)");
+    let owned_string = String::from("Data Dinamis di Heap");
+    let static_validated_1 = verify_static_bound(GLOBAL_SYSTEM_NAME);
+    let static_validated_2 = verify_static_bound(owned_string);
+    println!("   - {static_validated_1}");
+    println!("   - {static_validated_2} (String owned memenuhi trait bound T: 'static)");
+
+    // 6. Generic Tipe + Lifetime & Trait + Lifetime
+    println!("\n6. Generic Tipe + Lifetime & Trait + Lifetime:");
+    let score = 98.75;
+    let note = "Nilai evaluasi borrow checker sempurna";
+    let annotated = AnnotatedItem { item: &score, note };
+    println!("   - AnnotatedItem<f64>: {annotated}");
+
+    let int_array = [10, 20, 30, 40, 50];
+    let query_val = 30;
+    let found = find_first_match(&int_array, &query_val);
+    println!("   - find_first_match pada array: {:?}", found);
+
+    let ann_res = longest_with_announcement("Alpha", "BetaGamma", 2026);
+    println!("   - longest_with_announcement: \"{ann_res}\"");
+
+    let excerpt = Excerpt { part: "Rust guarantees memory safety without garbage collection" };
+    println!("   - Trait Highlightable: \"{}\"", excerpt.get_highlight());
+
+    let mut query_parser = Parser::new("SELECT name FROM users");
+    let tokens = query_parser.tokenize();
+    println!("   - Trait TextTokenizer: {:?}", tokens);
+
+    // 7. Evaluasi Dangling Reference & Validasi Kriteria Lulus Fase 8
+    println!("\n7. Evaluasi Pemahaman Lifetime & Kriteria Lulus Fase 8:");
+    let retained_slice = safe_lifetime_retention("Penyimpanan Memori Aman", 0, 11);
+    println!("   - safe_lifetime_retention: {:?}", retained_slice);
+    println!("   [x] Fungsi 'a: Menandai hubungan validitas antar referensi bagi borrow checker.");
+    println!("   [x] Non-extending: Lifetime tidak memperpanjang umur memori objek yang dipinjam.");
+    println!("   [x] Lifetime Elision: 3 aturan deterministik yang mengotomatisasi anotasi.");
+    println!("   [x] Struct Reference: Struct Parser<'a> dan Excerpt<'a> valid selama sumber referensi hidup.");
+}
+```
+
+---
+
+### 8.9 Hasil Eksekusi Output Terminal & Evaluasi Kelulusan Fase 8
+
+```text
+============================================================
+=== Fase 8: Lifetimes Mendalam ('a, Struct, Impl, Static) ===
+============================================================
+
+1. Demonstrasi fn longest<'a> dan first<'a>:
+   - String 1        : "Bahasa Pemrograman Rust" (len: 23)
+   - String 2        : "Modern 2024" (len: 11)
+   - Hasil longest() : "Bahasa Pemrograman Rust"
+   - Hasil first()   : "Bahasa Pemrograman Rust"
+
+2. Multiple Lifetime Parameters ('a, 'b):
+   - Konteks aktif di inner scope: "Audit Sesi #8812"
+   - Hasil di outer scope: "Dokumen Rahasia Negara" ✓ (Bebas dari batasan masa hidup konteks)
+
+3. Lifetime pada Struct dan Impl (Parser<'a>):
+   - Sumber Teks      : "POST /api/v1/auth/login HTTP/1.1"
+   - Token 1 (Method) : "POST"
+   - Token 2 (Path)   : "/api/v1/auth/login"
+   - Token 3 (Proto)  : "HTTP/1.1"
+   - Token 4 (Habis)  : None
+   - Peek sisa string : None
+   - Method announce  : "POST /api/v1/auth/login HTTP/1.1"
+
+4. Pembuktian Tiga Aturan Lifetime Elision:
+   - Frasa Asli       : "Zero-Cost Abstraction in Rust"
+   - first_word (Elision Rule 1 & 2): "Zero-Cost"
+   - first_word_explicit          : "Zero-Cost"
+
+5. Analisis Lifetime 'static:
+   - Konstanta Binary Global       : "RUST_LEARNING_SYSTEM_V2" (&'static str)
+   - [Static Validated]: RUST_LEARNING_SYSTEM_V2
+   - [Static Validated]: Data Dinamis di Heap (String owned memenuhi trait bound T: 'static)
+
+6. Generic Tipe + Lifetime & Trait + Lifetime:
+   - AnnotatedItem<f64>: 98.75 (Catatan: Nilai evaluasi borrow checker sempurna)
+   - find_first_match pada array: Some(30)
+   - longest_with_announcement: "BetaGamma"
+   - Trait Highlightable: "Rust guarantees memory safety without garbage collection"
+   - Trait TextTokenizer: ["SELECT", "name", "FROM", "users"]
+
+7. Evaluasi Pemahaman Lifetime & Kriteria Lulus Fase 8:
+   - safe_lifetime_retention: Some("Penyimpanan")
+   [x] Fungsi 'a: Menandai hubungan validitas antar referensi bagi borrow checker.
+   [x] Non-extending: Lifetime tidak memperpanjang umur memori objek yang dipinjam.
+   [x] Lifetime Elision: 3 aturan deterministik yang mengotomatisasi anotasi.
+   [x] Struct Reference: Struct Parser<'a> dan Excerpt<'a> valid selama sumber referensi hidup.
+```
+
+---
 ---
 
 ## FASE 9: Functional Rust (Closures & Iterators)

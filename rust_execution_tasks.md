@@ -557,21 +557,21 @@ Materi:
 
 ## Task 1 — Option
 
-- [ ] `Some`
-- [ ] `None`
-- [ ] `match`
-- [ ] `if let`
-- [ ] `map`
-- [ ] `and_then`
-- [ ] `unwrap_or`
+- [x] `Some`
+- [x] `None`
+- [x] `match`
+- [x] `if let`
+- [x] `map`
+- [x] `and_then`
+- [x] `unwrap_or`
 
 ## Task 2 — Result
 
-- [ ] `Ok`
-- [ ] `Err`
-- [ ] `match`
-- [ ] `?`
-- [ ] error propagation
+- [x] `Ok`
+- [x] `Err`
+- [x] `match`
+- [x] `?`
+- [x] error propagation
 
 ## Task 3 — Custom Error
 
@@ -585,40 +585,40 @@ enum AppError {
 }
 ```
 
-- [ ] `Debug`
-- [ ] `Display`
-- [ ] `Error`
-- [ ] Konversi error
-- [ ] Propagation dengan `?`
+- [x] `Debug`
+- [x] `Display`
+- [x] `Error`
+- [x] Konversi error
+- [x] Propagation dengan `?`
 
 ## Task 4 — Collections
 
-- [ ] `Vec<T>`
-- [ ] `Vec::with_capacity`
-- [ ] `push`
-- [ ] `get`
-- [ ] `retain`
-- [ ] `HashMap`
-- [ ] `entry`
-- [ ] `or_insert`
-- [ ] `and_modify`
+- [x] `Vec<T>`
+- [x] `Vec::with_capacity`
+- [x] `push`
+- [x] `get`
+- [x] `retain`
+- [x] `HashMap`
+- [x] `entry`
+- [x] `or_insert`
+- [x] `and_modify`
 
 ## Mini Project Fase 6 — CLI Task Manager v1
 
 Fitur:
-- [ ] Add task.
-- [ ] List task.
-- [ ] Delete task.
-- [ ] Find task.
-- [ ] Error ketika task tidak ditemukan.
-- [ ] Tidak memakai `unwrap()` pada jalur input utama.
+- [x] Add task.
+- [x] List task.
+- [x] Delete task.
+- [x] Find task.
+- [x] Error ketika task tidak ditemukan.
+- [x] Tidak memakai `unwrap()` pada jalur input utama.
 
 ### Lulus fase
 
-- [ ] Bisa menjelaskan kapan menggunakan `Option` dan kapan `Result`.
-- [ ] Bisa memakai `?`.
-- [ ] Bisa membuat custom error sederhana.
-- [ ] Bisa memakai HashMap Entry API.
+- [x] Bisa menjelaskan kapan menggunakan `Option` dan kapan `Result`.
+- [x] Bisa memakai `?`.
+- [x] Bisa membuat custom error sederhana.
+- [x] Bisa memakai HashMap Entry API.
 
 ---
 
@@ -645,9 +645,9 @@ Materi:
 ## Task 1 — Generic Function
 
 Buat function generic untuk:
-- [ ] memilih nilai terbesar.
-- [ ] mencetak nilai.
-- [ ] mengubah collection.
+- [x] memilih nilai terbesar.
+- [x] mencetak nilai.
+- [x] mengubah collection.
 
 ## Task 2 — Trait
 
@@ -659,9 +659,9 @@ trait Summary {
 }
 ```
 
-- [ ] Implementasikan pada 2 struct.
-- [ ] Default implementation.
-- [ ] Trait bound.
+- [x] Implementasikan pada 2 struct.
+- [x] Default implementation.
+- [x] Trait bound.
 
 ## Task 3 — Dispatch
 
@@ -672,9 +672,9 @@ fn process<T: Summary>(item: &T)
 fn process(item: &dyn Summary)
 ```
 
-- [ ] Bandingkan static dispatch.
-- [ ] Bandingkan dynamic dispatch.
-- [ ] Gunakan `Box<dyn Summary>`.
+- [x] Bandingkan static dispatch.
+- [x] Bandingkan dynamic dispatch.
+- [x] Gunakan `Box<dyn Summary>`.
 
 ## Task 4 — Associated Types
 
@@ -689,6 +689,10 @@ trait Repository {
 }
 ```
 
+- [x] Definisikan trait dengan associated types `type Item` dan `type Error`.
+- [x] Implementasikan pada struct konkret (misal `UserRepository`).
+- [x] Bandingkan associated types vs generic parameters (`trait Repository<Item, Error>`).
+
 ## Task 5 — Newtype
 
 Buat:
@@ -698,7 +702,7 @@ struct UserId(u64);
 struct OrderId(u64);
 ```
 
-- [ ] Jelaskan mengapa type safety lebih baik daripada memakai `u64` untuk semuanya.
+- [x] Jelaskan mengapa type safety lebih baik daripada memakai `u64` untuk semuanya.
 
 ## Mini Project Fase 7 — Repository Abstraction
 
@@ -714,10 +718,10 @@ MockRepository
 
 ### Lulus fase
 
-- [ ] Bisa menjelaskan generic vs trait.
-- [ ] Bisa menjelaskan static vs dynamic dispatch.
-- [ ] Bisa menggunakan associated type.
-- [ ] Paham orphan rule secara konsep.
+- [x] Bisa menjelaskan generic vs trait.
+- [x] Bisa menjelaskan static vs dynamic dispatch.
+- [x] Bisa menggunakan associated type.
+- [x] Paham orphan rule secara konsep.
 
 ---
 
@@ -729,15 +733,15 @@ Memahami lifetime sebagai hubungan validitas reference, bukan sebagai "memperpan
 
 ## Task
 
-- [ ] `fn longest<'a>(...)`.
-- [ ] Multiple lifetime parameter.
-- [ ] Lifetime pada struct.
-- [ ] Lifetime pada `impl`.
-- [ ] Lifetime elision.
-- [ ] `'static`.
-- [ ] Reference sebagai field.
-- [ ] Generic + lifetime.
-- [ ] Trait + lifetime.
+- [x] `fn longest<'a>(...)`.
+- [x] Multiple lifetime parameter.
+- [x] Lifetime pada struct.
+- [x] Lifetime pada `impl`.
+- [x] Lifetime elision.
+- [x] `'static`.
+- [x] Reference sebagai field.
+- [x] Generic + lifetime.
+- [x] Trait + lifetime.
 
 ## Eksperimen
 
@@ -754,17 +758,17 @@ struct Parser<'a> {
     source: &'a str,
 }
 ```
-
-- [ ] Sengaja buat dangling-reference scenario.
-- [ ] Baca error borrow checker.
-- [ ] Perbaiki tanpa `.clone()` jika memungkinkan.
+ 
+- [x] Sengaja buat dangling-reference scenario.
+- [x] Baca error borrow checker.
+- [x] Perbaiki tanpa `.clone()` jika memungkinkan.
 
 ### Lulus fase
 
-- [ ] Bisa menjelaskan apa fungsi `'a`.
-- [ ] Bisa menjelaskan bahwa lifetime annotation tidak memperpanjang umur object.
-- [ ] Bisa menjelaskan lifetime elision.
-- [ ] Bisa membuat struct yang menyimpan reference.
+- [x] Bisa menjelaskan apa fungsi `'a`.
+- [x] Bisa menjelaskan bahwa lifetime annotation tidak memperpanjang umur object.
+- [x] Bisa menjelaskan lifetime elision.
+- [x] Bisa membuat struct yang menyimpan reference.
 
 ---
 
