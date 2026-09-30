@@ -6052,44 +6052,1152 @@ pub fn run() {
 
 ## FASE 9: Functional Rust (Closures & Iterators)
 
-### 9.1 Tiga Kategori Trait Closure
-1. **`FnOnce`**: Mengambil kepemilikan (*moves*) variabel dari luar scope. Hanya bisa dipanggil 1 kali.
-2. **`FnMut`**: Meminjam secara mutable (`&mut`) variabel dari luar scope. Bisa dipanggil berkali-kali dan memutasi state.
-3. **`Fn`**: Hanya meminjam secara immutable (`&`) variabel dari luar scope. Bisa dipanggil berkali-kali secara aman (bahkan concurrent).
+### 9.1 Closures Mendalam (Captures, Move Keyword, Fn, FnMut, FnOnce)
 
+Closure di Rust adalah fungsi anonim (*anonymous function*) yang dapat menangkap (*capture*) variabel dari lingkungannya (*enclosing environment*). Berbeda dengan fungsi biasa (`fn`), closure memiliki kemampuan menyimpan *state* dari scope luar. 
+
+---
+
+#### 9.1.1 Mental Model: Mengapa Sintaks `|...|` & Apa Hubungannya dengan Bahasa Lain?
+
+Bagi developer yang datang dari bahasa lain (seperti JavaScript atau Python), closure terasa sangat familiar namun memiliki beberapa perbedaan fundamental:
+
+1. **Persamaan dengan Bahasa Lain (Lambda / Arrow Function)**:
+   Closure di Rust adalah konsep yang sama persis dengan fungsi anonim di bahasa lain:
+   - **JavaScript / TypeScript**: `const add = (x) => x + bonus;`
+   - **Python**: `add = lambda x: x + bonus`
+   - **Go**: `add := func(x int) int { return x + bonus }`
+   - **Rust**: `let add = |x| x + bonus;`
+
+2. **Mengapa Sintaks Menggunakan Pipa `|x|` Bukan Kurung `(x)`?**
+   - **Warisan Ruby & Smalltalk**: Rust mengadopsi sintaks `|params| body` dari bahasa Ruby (`items.each { |x| puts x }`) karena ringkas dan ekspresif.
+   - **Mencegah Ambiguitas Parsing Compiler**: Di Rust, tanda kurung `(a, b)` sudah digunakan untuk banyak konstruksi penting: tuple `(1, 2)`, grouping aritmatika `(a + b) * c`, dan signature fungsi `fn(a, b)`. Dengan pembatas pipa `|...|`, parser compiler Rust dapat langsung mengenali deklarasi closure tanpa perlu kata kunci tambahan seperti `lambda` atau `function`.
+     - Tanpa parameter: `|| cetak_log()`
+     - Satu parameter: `|x| x * 2`
+     - Banyak parameter: `|a, b| a + b`
+
+3. **Kenapa di Bahasa Lain Terasa Santai, tetapi di Rust Ada `Fn`, `FnMut`, `FnOnce`?**
+   - **Garbage Collector (GC) vs Zero-Cost Abstraction**: Di JavaScript, Python, atau Java, terdapat Garbage Collector (GC). Saat fungsi menangkap variabel luar, GC otomatis mengamankan variabel tersebut di Heap memory selamanya. Programmer tidak perlu memikirkan apakah variabel itu dipinjam atau dimutasi.
+   - **Rust Tanpa GC**: Rust tidak memiliki runtime GC demi performa maksimal. Rust harus mengetahui secara pasti saat waktu kompilasi (*compile-time*): *Apakah variabel luar hanya dipinjam baca (`&`), dipinjam ubah (`&mut`), atau diambil kepemilikannya (`move`)?*
+   - Oleh karena itu, Rust mendefinisikan 3 trait (`Fn`, `FnMut`, `FnOnce`) agar aturan Borrow Checker tetap berlaku 100% tanpa runtime overhead!
+
+4. **Rahasia di Balik Layar: Compiler Menghasilkan Struct Anonim Unik**:
+   Saat Anda menulis:
+   ```rust
+   let factor = 3;
+   let multiply = |x: i32| x * factor;
+   ```
+   Secara internal, compiler Rust membuat sebuah `struct` anonim unik tak kasat mata:
+   ```rust
+   struct ClosureEnv<'a> {
+       factor: &'a i32, // memegang referensi ke variabel factor
+   }
+
+   impl<'a> ClosureEnv<'a> {
+       fn call(&self, x: i32) -> i32 {
+           x * (*self.factor)
+       }
+   }
+   ```
+
+---
+
+#### 9.1.2 Analogi Dunia Nyata: Tiga Kategori Trait Closure
+
+Untuk mengingat ketiga trait ini dengan mudah, gunakan analogi kepemilikan sehari-hari:
+
+| Trait Closure | Parameter Method Internal | Hak Akses Memori | Berapa Kali Bisa Dipanggil? | Analogi Dunia Nyata |
+| :--- | :--- | :--- | :--- | :--- |
+| **`Fn`** | `&self` | Meminjam secara immutable (`&`). Hanya membaca data lingkungan. | **Berkali-kali** (bahkan paralel lintas thread). | **Membaca Buku di Perpustakaan**: Buku tidak dicoret/rusak. Banyak orang boleh membaca berkali-kali bersamaan. |
+| **`FnMut`** | `&mut self` | Meminjam secara mutable (`&mut`). Mengubah nilai data lingkungan. | **Berkali-kali** (harus berurutan/eksklusif). | **Buku Catatan Harian**: Anda mencoret dan menambah catatan baru. Bisa dipakai berulang kali, tapi harus antre saat menulis. |
+| **`FnOnce`** | `self` | Mengambil ownership (*moves*). Mengonsumsi/menghancurkan data. | **Hanya 1 Kali**. | **Memakan Sepotong Kue / Membakar Surat**: Begitu kue dimakan atau surat dibakar, bendanya lenyap. Anda tidak bisa memakannya untuk kedua kali! |
+
+---
+
+#### 9.1.3 Hirarki dan Definisi Trait Closure di Rust
+Rust Standard Library membagi closure ke dalam 3 trait fundamental:
+
+```text
+       FnOnce (paling umum: mengambil kepemilikan / moves, dipanggil 1 kali)
+         ^
+         |  (super-trait: pub trait FnMut<Args>: FnOnce<Args>)
+       FnMut  (meminjam mutable &mut, bisa memutasi state, dipanggil berkali-kali)
+         ^
+         |  (super-trait: pub trait Fn<Args>: FnMut<Args>)
+       Fn     (hanya meminjam immutable &, aman dipanggil berkali-kali secara concurrent)
+```
+
+**Aturan Hirarki Trait:**
+1. **`FnOnce`**: Menerima parameter `self` by value (`fn call_once(self, args: Args) -> Self::Output`). Karena mengambil ownership `self`, closure ini mengonsumsi dirinya sendiri saat dipanggil dan hanya bisa dieksekusi **satu kali**.
+2. **`FnMut`**: Menerima `&mut self` (`fn call_mut(&mut self, args: Args) -> Self::Output`). Mengizinkan pemutasi variabel internal/eksternal dan dapat dipanggil **berulang kali**.
+3. **`Fn`**: Menerima `&self` (`fn call(&self, args: Args) -> Self::Output`). Hanya membaca variabel lingkungan secara immutable (`&`). Aman dipanggil **berulang kali**, bahkan secara concurrent dari multiple thread.
+
+> **Hubungan Subtyping/Super-trait:**
+> - Semua closure yang mengimplementasikan `Fn` otomatis mengimplementasikan `FnMut` dan `FnOnce`.
+> - Semua closure yang mengimplementasikan `FnMut` otomatis mengimplementasikan `FnOnce`.
+> - Closure yang mengonsumsi atau mendestruksi kepemilikan data **hanya** mengimplementasikan `FnOnce`.
+
+**Dari Mana Sumber Trait Ini? (`std::ops` & Rust Standard Prelude)**  
+Ketiga trait closure didefinisikan secara resmi di Standard Library Rust pada modul `std::ops` (atau `core::ops::function`):
+- `std::ops::Fn`
+- `std::ops::FnMut`
+- `std::ops::FnOnce`
+
+> **Mengapa Kita Tidak Perlu Menulis `use std::ops::Fn;`?**  
+> Karena ketiga trait ini terdaftar di dalam **Rust Standard Prelude**. Rust otomatis meng-import trait-trait fundamental ini ke dalam setiap file `.rs` sejak awal kompilasi (bersama tipe dasar seperti `Option`, `Result`, `Vec`, `String`, dan trait seperti `Clone`, `Copy`, `Iterator`).
+
+Definisi formal di dalam Standard Library Rust:
 ```rust
-fn closure_demo() {
-    let factor = 3;
-    // Closure Fn (read-only borrow)
-    let calc = |x: i32| x * factor;
-    println!("Hasil: {}", calc(10));
+pub trait FnOnce<Args> {
+    type Output;
+    fn call_once(self, args: Args) -> Self::Output;
+}
 
-    // Closure FnOnce dengan keyword `move`
-    let data = vec![1, 2, 3];
-    let consumer = move || {
-        println!("Mengonsumsi data: {:?}", data);
-    };
-    consumer(); // data sudah di-drop di sini
+pub trait FnMut<Args>: FnOnce<Args> {
+    fn call_mut(&mut self, args: Args) -> Self::Output;
+}
+
+pub trait Fn<Args>: FnMut<Args> {
+    fn call(&self, args: Args) -> Self::Output;
 }
 ```
 
 ---
 
-### 9.2 Lazy Iterator Pipeline
+#### 9.1.4 Empat Mode Capture pada Closure
+
+1. **Closure Tanpa Capture (Zero-Sized Environment)**:
+   - Closure tidak menangkap variabel apapun dari scope luar.
+   - Ukuran struct di memori adalah 0 byte (`ZST`).
+   - Memenuhi `Fn`, `FnMut`, dan `FnOnce`.
+   - **Coercion**: Dapat di-*coerce* langsung menjadi function pointer murni (`fn(A, B) -> R`).
+   ```rust
+   let add = |a: i32, b: i32| a + b;
+   let fn_ptr: fn(i32, i32) -> i32 = add; // Coercion sukses
+   ```
+
+2. **Closure Capture Immutable (`&T`)**:
+   - Closure menangkap variabel lingkungan dengan meminjam secara baca-saja (*read-only reference*).
+   - Variabel luar tetap valid dan dapat dibaca secara paralel karena hanya shared borrow `&` yang aktif.
+   - Mengimplementasikan `Fn`, `FnMut`, dan `FnOnce`.
+   ```rust
+   let prefix = String::from("Rust");
+   let greet = |name: &str| format!("{prefix}: {name}"); // capture &prefix
+   ```
+
+3. **Closure Capture Mutable (`&mut T`)**:
+   - Closure meminjam variabel lingkungan secara eksklusif (*mutable reference*).
+   - Pemanggilan closure memutasi state variabel tersebut.
+   - Variabel closure **wajib** dideklarasikan dengan `let mut`.
+   - Mengimplementasikan `FnMut` dan `FnOnce` (TIDAK mengimplementasikan `Fn`).
+   ```rust
+   let mut count = 0;
+   let mut increment = || { count += 1; count }; // capture &mut count
+   ```
+
+4. **Keyword `move` (Ownership Transfer)**:
+   - Menambahkan kata kunci `move` memaksa closure mengambil kepemilikan penuh (*takes ownership*) dari variabel yang ditangkap, bukan meminjamnya.
+   - Sangat penting saat closure dikembalikan dari fungsi (`impl Fn`) atau dikirim ke thread lain (`std::thread::spawn`).
+   - **Miskonsepsi Umum**: `move` tidak selalu membuat closure menjadi `FnOnce`!
+     - Jika closure bertanda `move` hanya membaca data yang dipindahkan, closure tersebut **tetap mengimplementasikan `Fn`** dan dapat dipanggil berulang kali.
+     - Jika closure bertanda `move` mendestruksi/mengonsumsi data tersebut (misal memanggil `drop(data)` atau memindahkan nilai keluar), barulah closure tersebut menjadi **`FnOnce`** murni.
+   ```rust
+   // Tetap Fn (bisa dipanggil berkali-kali)
+   let text = String::from("Halo");
+   let reader = move |name: &str| format!("{text} {name}");
+
+   // Menjadi FnOnce murni (hanya bisa dipanggil 1x)
+   let data = vec![1, 2, 3];
+   let consumer = move || {
+       let _owned = data; // data dipindahkan / dikonsumsi di sini
+   };
+   ```
+
+---
+
+#### 9.1.5 Higher-Order Functions (HOF) dengan Generic Trait Bounds
+
+Closure umum digunakan sebagai argumen fungsi tingkat tinggi (Higher-Order Functions):
+
 ```rust
-fn iterator_pipeline() {
-    let numbers = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
-    // Evaluasi lazy: kalkulasi hanya dieksekusi saat `.collect()` dipanggil
-    let result: Vec<i32> = numbers
-        .iter()
-        .filter(|&&x| x % 2 == 0)      // Ambil yang genap: [2, 4, 6, 8, 10]
-        .map(|&x| x * x)              // Kuadratkan: [4, 16, 36, 64, 100]
-        .take(3)                      // Ambil 3 pertama: [4, 16, 36]
-        .collect();
-
-    println!("Pipeline Result: {:?}", result);
+// 1. Menerima Fn: Operasi murni/read-only yang aman dipanggil berkali-kali
+pub fn transform_elements<T, U, F>(items: &[T], transform: F) -> Vec<U>
+where
+    F: Fn(&T) -> U,
+{
+    items.iter().map(transform).collect()
 }
+
+// 2. Menerima FnMut: Operasi stateful atau agregasi/akumulator
+pub fn aggregate_stateful<T, S, F>(items: &[T], mut initial: S, mut accumulator: F) -> S
+where
+    F: FnMut(&mut S, &T),
+{
+    for item in items {
+        accumulator(&mut initial, item);
+    }
+    initial
+}
+
+// 3. Menerima FnOnce: Operasi transfer resource atau callback sekali panggil
+pub fn execute_and_consume<T, R, F>(resource: T, consumer: F) -> R
+where
+    F: FnOnce(T) -> R,
+{
+    consumer(resource)
+}
+```
+
+##### Deep Dive Generics pada HOF: `<T, U, F>`, Klausa `where`, dan `impl Trait`
+
+1. **Apakah Tanda `<...>` di Rust Selalu Menandakan Generics?**  
+   **Ya.** Tanda kurung siku `<...>` adalah penampung parameter generik yang dapat diisi oleh 3 jenis entitas:
+   - **Type Generics**: `<T>`, `<U>` (placeholder untuk sembarang tipe data konkret).
+   - **Lifetime Generics**: `<'a>`, `<'b>` (placeholder untuk durasi masa hidup referensi).
+   - **Const Generics**: `<const N: usize>` (placeholder untuk nilai konstan saat compile-time, misal ukuran array `[i32; N]`).
+
+2. **Mengapa Ada Banyak Parameter Tipe Sekaligus Seperti `<T, U, F>`?**  
+   Huruf kapital tunggal adalah konvensi penamaan standar Rust:
+   - `T` (*Type*): Tipe data input utama (misal `i32`).
+   - `U` (*Unique / Unit*): Tipe data output atau hasil konversi (misal `String`).
+   - `F` (*Function*): Tipe closure atau fungsi yang dioperasikan.
+   - `K, V` (*Key, Value*): Pasangan kunci dan nilai (misal pada `HashMap<K, V>`).
+   - `E` (*Error*): Tipe kegagalan/kesalahan (misal pada `Result<T, E>`).
+   - `R` (*Return*): Tipe kembalian umum.
+
+   > **Mengapa butuh `<T, U, F>` terpisah?**  
+   > Jika hanya memakai satu huruf `T`, fungsi `transform` akan memaksa input dan output bertipe sama (`Vec<T> -> Vec<T>`). Dengan adanya `U`, fungsi menjadi 100% fleksibel: input bisa `i32` dan output bisa `String`! Dan karena setiap closure di Rust memiliki tipe struct unik yang digenerate compiler, kita butuh `F` agar compiler tahu ada tipe callable unik yang dimasukkan.
+
+3. **Mengapa Menggunakan Klausa `where`?**  
+   Klausa `where` digunakan untuk mendefinisikan **Trait Bounds** (persyaratan kontrak trait) bagi parameter generic.  
+   Pernyataan `where F: Fn(&T) -> U` memberitahu compiler: *"Tipe `F` boleh bertipe apa saja, ASALKAN ia mengimplementasikan trait `Fn` yang menerima referensi `&T` dan mengembalikan nilai bertipe `U`."*
+
+4. **Tiga Gaya Penulisan Ekuivalen (`impl Trait` vs Generic Inline vs `where`):**  
+   Ketiga bentuk berikut menghasilkan kode biner mesin yang sama persis (*monomorphization / zero-cost static dispatch*):
+   ```rust
+   // Gaya 1: impl Trait (paling ringkas jika hanya 1 parameter closure)
+   fn apply(f: impl Fn(i32) -> i32) { ... }
+
+   // Gaya 2: Generic Inline di dalam <>
+   fn apply<F: Fn(i32) -> i32>(f: F) { ... }
+
+   // Gaya 3: Klausa where (paling rapi saat signature memiliki banyak generic)
+   fn apply<F>(f: F) where F: Fn(i32) -> i32 { ... }
+   ```
+
+5. **Kapan Wajib Menggunakan `impl Trait`?**  
+   Saat **mengembalikan closure dari sebuah fungsi** (*return type*):
+   ```rust
+   fn create_multiplier(factor: i32) -> impl Fn(i32) -> i32 {
+       move |x| x * factor
+   }
+   ```
+   Karena compiler Rust membuat nama struct anonim tersembunyi untuk setiap closure yang tidak bisa kita ketik namanya di kode, kita **wajib** menggunakan `-> impl Fn(...)` untuk memberitahu compiler bahwa fungsi mengembalikan sebuah objek yang mengimplementasikan trait `Fn`.
+
+---
+
+#### 9.1.6 Implementasi Lengkap Modul `fase9_task_1.rs`
+
+Berikut adalah kode sumber lengkap yang telah diuji dan diintegrasikan pada `rust-learning-lab/src/fase9_task_1.rs`:
+
+```rust
+// Fase 9 - Task 1: Closures Mendalam (Captures, Move Keyword, Fn, FnMut, FnOnce)
+// Rujukan: rust_learning_guide.md (Sub-bab 9.1) & rust_execution_tasks.md (L794-L800)
+
+// ----------------------------------------------------------------------------
+// 1. Helper Verifikasi Trait Kategori (Fn, FnMut, FnOnce)
+// ----------------------------------------------------------------------------
+
+pub fn verify_fn<F, R>(f: F) -> R
+where
+    F: Fn() -> R,
+{
+    f()
+}
+
+pub fn verify_fn_mut<F, R>(mut f: F) -> R
+where
+    F: FnMut() -> R,
+{
+    f()
+}
+
+pub fn verify_fn_once<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    f()
+}
+
+// ----------------------------------------------------------------------------
+// 2. Closure Tanpa Capture (Zero-sized Environment & Fn Pointer Coercion)
+// ----------------------------------------------------------------------------
+
+pub fn create_no_capture_closure() -> impl Fn(i32, i32) -> i32 {
+    |a: i32, b: i32| a + b
+}
+
+pub fn call_as_fn_pointer(f: fn(i32, i32) -> i32, a: i32, b: i32) -> i32 {
+    f(a, b)
+}
+
+// ----------------------------------------------------------------------------
+// 3. Closure Capture Immutable (&T)
+// ----------------------------------------------------------------------------
+
+pub fn demonstrate_immutable_capture(prefix: &str, items: &[&str]) -> Vec<String> {
+    let formatter = |item: &str| format!("{prefix}: {item}");
+
+    let mut results = Vec::new();
+    for &item in items {
+        results.push(formatter(item));
+    }
+    results
+}
+
+// ----------------------------------------------------------------------------
+// 4. Closure Capture Mutable (&mut T)
+// ----------------------------------------------------------------------------
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct SimpleCounter {
+    pub total: i32,
+    pub operations: usize,
+}
+
+impl SimpleCounter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+pub fn demonstrate_mutable_capture(counter: &mut SimpleCounter, steps: &[i32]) {
+    let mut step_recorder = |amount: i32| {
+        counter.total += amount;
+        counter.operations += 1;
+    };
+
+    for &step in steps {
+        step_recorder(step);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 5. Keyword `move`: Pemindahan Kepemilikan (Ownership Transfer)
+// ----------------------------------------------------------------------------
+
+pub fn create_move_reader(prefix: String) -> impl Fn(&str) -> String {
+    move |target: &str| format!("{prefix} -> {target}")
+}
+
+pub fn create_move_consumer(data: Vec<String>) -> impl FnOnce() -> (usize, String) {
+    move || {
+        let count = data.len();
+        let combined = data.into_iter().collect::<Vec<_>>().join(", ");
+        (count, combined)
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 6. Higher-Order Functions (HOF) dengan Generic Trait Bounds
+// ----------------------------------------------------------------------------
+
+pub fn transform_elements<T, U, F>(items: &[T], transform: F) -> Vec<U>
+where
+    F: Fn(&T) -> U,
+{
+    items.iter().map(transform).collect()
+}
+
+pub fn aggregate_stateful<T, S, F>(items: &[T], mut initial: S, mut accumulator: F) -> S
+where
+    F: FnMut(&mut S, &T),
+{
+    for item in items {
+        accumulator(&mut initial, item);
+    }
+    initial
+}
+
+pub fn execute_and_consume<T, R, F>(resource: T, consumer: F) -> R
+where
+    F: FnOnce(T) -> R,
+{
+    consumer(resource)
+}
+
+// ----------------------------------------------------------------------------
+// 7. Runner Interaktif (Demonstrasi Lengkap)
+// ----------------------------------------------------------------------------
+
+pub fn run() {
+    println!("=== FASE 9: Functional Rust - Task 1 (Closures) ===");
+
+    // 1. Closure tanpa capture
+    println!("\n1. Closure Tanpa Capture:");
+    let add = create_no_capture_closure();
+    println!("   - add(15, 27) = {}", add(15, 27));
+    let fn_ptr_result = call_as_fn_pointer(|x, y| x * y, 6, 7);
+    println!("   - Coercion ke fn pointer: 6 * 7 = {fn_ptr_result}");
+    let fn_test = verify_fn(|| "Fn tanpa capture valid");
+    println!("   - Verifikasi trait: {fn_test}");
+
+    // 2. Closure capture immutable
+    println!("\n2. Closure Capture Immutable (&T):");
+    let tag = String::from("TAG");
+    let words = vec!["alpha", "beta", "gamma"];
+    let tagged = demonstrate_immutable_capture(&tag, &words);
+    println!("   - Hasil capture immutable: {:?}", tagged);
+    println!("   - Tag di luar closure tetap utuh: \"{tag}\"");
+
+    // 3. Closure capture mutable
+    println!("\n3. Closure Capture Mutable (&mut T):");
+    let mut counter = SimpleCounter::new();
+    let steps = [10, 20, 30];
+    demonstrate_mutable_capture(&mut counter, &steps);
+    println!(
+        "   - Counter setelah mutasi: total = {}, operations = {}",
+        counter.total, counter.operations
+    );
+
+    // 4. Keyword `move`
+    println!("\n4. Keyword `move`:");
+    let reader_prefix = String::from("SISTEM");
+    let reader = create_move_reader(reader_prefix);
+    println!("   - Move-reader call 1: {}", reader("INIT"));
+    println!("   - Move-reader call 2: {}", reader("READY"));
+
+    let data_vec = vec![String::from("data1"), String::from("data2")];
+    let consumer = create_move_consumer(data_vec);
+    let (count, joined) = consumer();
+    println!("   - Move-consumer FnOnce result: count = {count}, data = \"{joined}\"");
+
+    // 5. Pembuktian Kategori Trait (Fn, FnMut, FnOnce)
+    println!("\n5. Hirarki & Penentuan Trait Closure:");
+    let pure_fn = || 100 * 2;
+    println!("   - pure_fn lewat verify_fn: {}", verify_fn(pure_fn));
+    println!("   - pure_fn lewat verify_fn_mut: {}", verify_fn_mut(pure_fn));
+    println!("   - pure_fn lewat verify_fn_once: {}", verify_fn_once(pure_fn));
+
+    let mut state = 5;
+    let mut_fn = || {
+        state += 10;
+        state
+    };
+    println!("   - mut_fn lewat verify_fn_mut: {}", verify_fn_mut(mut_fn));
+
+    let owned_string = String::from("Ownership dikonsumsi");
+    let once_fn = move || {
+        let consumed = owned_string;
+        consumed.len()
+    };
+    println!("   - once_fn lewat verify_fn_once: {}", verify_fn_once(once_fn));
+
+    // 6. Higher-Order Functions (HOF)
+    println!("\n6. Demonstrasi Higher-Order Functions (HOF):");
+    let nums = [1, 2, 3, 4, 5];
+    let squares = transform_elements(&nums, |&x| x * x);
+    println!("   - HOF transform (Fn): {:?}", squares);
+
+    let sum = aggregate_stateful(&nums, 0, |acc, &x| *acc += x);
+    println!("   - HOF aggregate (FnMut): sum = {sum}");
+
+    let res = execute_and_consume(vec![10, 20, 30], |v| v.iter().sum::<i32>());
+    println!("   - HOF execute_and_consume (FnOnce): sum = {res}");
+
+    println!("\n[OK] Task 1 Closures selesai & terverifikasi.");
+}
+```
+
+---
+
+#### 9.1.7 Hasil Eksekusi Output Terminal Task 1
+
+```text
+=== FASE 9: Functional Rust - Task 1 (Closures) ===
+
+1. Closure Tanpa Capture:
+   - add(15, 27) = 42
+   - Coercion ke fn pointer: 6 * 7 = 42
+   - Verifikasi trait: Fn tanpa capture valid
+
+2. Closure Capture Immutable (&T):
+   - Hasil capture immutable: ["TAG: alpha", "TAG: beta", "TAG: gamma"]
+   - Tag di luar closure tetap utuh: "TAG"
+
+3. Closure Capture Mutable (&mut T):
+   - Counter setelah mutasi: total = 60, operations = 3
+
+4. Keyword `move`:
+   - Move-reader call 1: SISTEM -> INIT
+   - Move-reader call 2: SISTEM -> READY
+   - Move-consumer FnOnce result: count = 2, data = "data1, data2"
+
+5. Hirarki & Penentuan Trait Closure:
+   - pure_fn lewat verify_fn: 200
+   - pure_fn lewat verify_fn_mut: 200
+   - pure_fn lewat verify_fn_once: 200
+   - mut_fn lewat verify_fn_mut: 15
+   - once_fn lewat verify_fn_once: 20
+
+6. Demonstrasi Higher-Order Functions (HOF):
+   - HOF transform (Fn): [1, 4, 9, 16, 25]
+   - HOF aggregate (FnMut): sum = 15
+   - HOF execute_and_consume (FnOnce): sum = 60
+
+[OK] Task 1 Closures selesai & terverifikasi.
+```
+
+---
+
+### 9.2 Iterators Mendalam (Lazy Pipeline, Adaptors, dan Terminal Operations)
+
+Iterator di Rust adalah pola desain yang memungkinkan Anda melintasi urutan elemen (*sequence of items*) satu per satu. Di Rust, iterator bersifat **zero-cost abstraction**: kompilasi pipeline iterator sering kali menghasilkan kode mesin assembly yang secepat atau bahkan lebih cepat daripada loop `for` manual karena optimasi unrolling dan inlining LLVM tanpa pemeriksaan batas berulang (*bounds checking*).
+
+---
+
+#### 9.2.1 Konsep Inti Trait `Iterator` & Evaluasi Malas (*Lazy Evaluation*)
+
+Semua iterator di Rust dibangun di atas satu trait fundamental dari Standard Library:
+
+```rust
+pub trait Iterator {
+    type Item; // Associated Type: tipe elemen yang dihasilkan
+
+    // Satu-satunya method yang wajib diimplementasikan
+    fn next(&mut self) -> Option<Self::Item>;
+
+    // Puluhan method default lainnya (map, filter, take, fold, dll.)
+    // dibangun otomatis di atas next()!
+}
+```
+
+> **Hukum Evaluasi Malas (Lazy Evaluation):**  
+> Di Rust, iterator bersifat **malas (*lazy*)**. Menulis `v.iter().map(...)` atau `.filter(...)` **tidak melakukan komputasi apapun** pada elemen! Komputasi baru benar-benar berjalan ketika ada method pemanggil (*consuming adaptor*) seperti `.next()`, `.collect()`, atau `.fold()` yang memaksa iterator menarik elemen keluar.
+
+---
+
+#### 9.2.2 Tiga Pintu Masuk Iterator dari Koleksi
+
+Cara kita membuat iterator menentukan hak kepemilikan memori terhadap elemen koleksi:
+
+| Method Koleksi | Tipe Elemen (`Item`) | Hak Akses Memori | Status Koleksi Asli Setelah Iterasi |
+| :--- | :--- | :--- | :--- |
+| **`.iter()`** | `&T` | **Immutable Borrow**: Hanya membaca elemen tanpa modifikasi. | **Tetap Utuh**: Masih bisa dipakai dan dibaca kembali. |
+| **`.iter_mut()`** | `&mut T` | **Mutable Borrow**: Meminjam referensi eksklusif untuk mengubah elemen. | **Tetap Utuh Terbarui**: Nilai elemen berubah secara *in-place*. |
+| **`.into_iter()`** | `T` | **Ownership Transfer**: Mengambil kepemilikan elemen langsung (*moves*). | **Dikonsumsi/Lenyap**: Koleksi asli hancur dan tidak bisa diakses lagi. |
+
+```rust
+let mut numbers = vec![1, 2, 3];
+
+// 1. .iter() -> &i32
+for &n in numbers.iter() { /* cuma baca */ }
+
+// 2. .iter_mut() -> &mut i32
+for n in numbers.iter_mut() { *n += 10; } // in-place update
+
+// 3. .into_iter() -> i32 (numbers dipindahkan kepemilikannya)
+let doubled: Vec<i32> = numbers.into_iter().map(|n| n * 2).collect();
+// numbers sudah tidak bisa dipanggil lagi di bawah sini!
+```
+
+---
+
+#### 9.2.3 Iterator Adaptors (Lazy Transformers)
+
+*Iterator Adaptors* adalah method yang menerima sebuah iterator dan mengembalikan iterator baru yang ditransformasi. Method ini **tidak mengeksekusi iterasi**, melainkan hanya menyusun *blueprint* pipa pengolahan:
+
+1. **`.map(closure)`**: Mengubah setiap elemen dari tipe `T` menjadi `U`.
+2. **`.filter(predicate)`**: Menyaring elemen, hanya meneruskan elemen yang menghasilkan `true`.
+3. **`.take(n)`**: Menghentikan iterasi setelah menghasilkan `n` elemen pertama.
+4. **`.copied()`**: Mengubah iterator referensi `&T` menjadi iterator nilai murni `T` dengan menyalin nilai elemen (*bitwise copy*). Khusus untuk tipe yang mengimplementasikan trait `Copy` (seperti `i32`, `f64`, `bool`, `char`).
+5. **`.cloned()`**: Versi umum dari `.copied()` untuk tipe data yang mengimplementasikan trait `Clone` (misal `String`, `Vec<T>`). Menghasilkan nilai kepemilikan baru dengan menduplikasi data (bisa memicu alokasi heap).
+
+##### Mengapa `.copied()` Sangat Sering Digunakan di Pipeline?
+
+Saat Anda memanggil `numbers.iter()`, tipe elemen yang mengalir di dalam iterator adalah referensi: `&i32`.
+
+Tanpa `.copied()`:
+```rust
+let numbers = vec![10, 20, 30, 40];
+
+// 1. filter menerima referensi ke item (&Item), sehingga jadi referensi ganda: &&i32!
+// Kita terpaksa menulis pattern canggung |&&x| atau |&x| *x > 25
+let filtered: Vec<&i32> = numbers.iter().filter(|&&x| x > 25).collect();
+
+// 2. max() mengembalikan referensi Option<&i32>, bukan angka mandiri Option<i32>
+let max_val: Option<&i32> = numbers.iter().max();
+```
+
+Dengan `.copied()`:
+```rust
+let numbers = vec![10, 20, 30, 40];
+
+// .copied() langsung melepas lapisan referensi (&i32 -> i32) secara zero-cost
+let filtered: Vec<i32> = numbers
+    .iter()
+    .copied()                    // Mengalirkan i32 murni
+    .filter(|&x| x > 25)         // Cukup &x sederhana (bukan &&x)
+    .collect();                  // Menghasilkan Vec<i32> murni
+
+let max_val: Option<i32> = numbers.iter().copied().max(); // Langsung Option<i32>
+```
+
+> **Aturan Praktis:**
+> - Jika koleksi berisi angka/tipe primitif (`Copy`) dan Anda ingin mengumpulkan nilai murni atau mencari `max()`/`min()`, selalu sisipkan `.copied()` tepat setelah `.iter()`.
+> - Jika koleksi berisi `String` atau struct dan Anda butuh kepemilikan baru tanpa menghancurkan koleksi lama, gunakan `.cloned()`.
+
+---
+
+#### 9.2.4 Consuming Adaptors (Terminal Eager Operations)
+
+*Consuming Adaptors* adalah operasi terminal yang mengonsumsi iterator dan memicu proses eksekusi loop di balik layar:
+
+1. **`.collect()`**: Mengumpulkan hasil iterasi ke dalam koleksi target (misal `Vec<T>`, `HashSet<T>`, atau `HashMap<K, V>`). Sering membutuhkan anotasi tipe target atau sintaks *turbofish* `collect::<Vec<_>>()`.
+2. **`.find(predicate)`**: Mencari elemen pertama yang memenuhi syarat. Bersifat *short-circuiting* (berhenti seketika saat elemen ditemukan), mengembalikan `Option<Item>`.
+3. **`.any(predicate)`**: Mengembalikan `true` jika ada **minimal 1 elemen** yang cocok (*short-circuiting*).
+4. **`.all(predicate)`**: Mengembalikan `true` jika **seluruh elemen** cocok (*short-circuiting*).
+5. **`.fold(init, closure)`**: Mereduksi seluruh elemen menjadi nilai tunggal menggunakan akumulator awal: `fold(initial_state, |acc, item| acc + item)`.
+
+---
+
+#### 9.2.5 Custom Iterator: Implementasi Mandiri
+
+Untuk membuat iterator sendiri, kita cukup membuat struct dan mengimplementasikan `next(&mut self) -> Option<Item>`:
+
+```rust
+pub struct Fibonacci {
+    curr: u64,
+    next: u64,
+}
+
+impl Iterator for Fibonacci {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let new_next = self.curr.checked_add(self.next)?;
+        let result = self.curr;
+        self.curr = self.next;
+        self.next = new_next;
+        Some(result)
+    }
+}
+```
+
+---
+
+#### 9.2.6 Implementasi Lengkap Modul `fase9_task_2.rs`
+
+Berikut kode modul lengkap yang selaras 100% pada `rust-learning-lab/src/fase9_task_2.rs`:
+
+```rust
+// Fase 9 - Task 2: Lazy Iterators, Iterator Adaptors, dan Consuming Adaptors
+// Rujukan: rust_learning_guide.md (Sub-bab 9.2) & rust_execution_tasks.md (L802-L825)
+
+// ----------------------------------------------------------------------------
+// 1. Tiga Metode Penghasil Iterator: iter(), iter_mut(), dan into_iter()
+// ----------------------------------------------------------------------------
+
+pub fn demonstrate_iter(items: &[i32]) -> Vec<i32> {
+    items.iter().map(|&x| x * 2).collect()
+}
+
+pub fn demonstrate_iter_mut(items: &mut [i32], addition: i32) {
+    for item in items.iter_mut() {
+        *item += addition;
+    }
+}
+
+pub fn demonstrate_into_iter(items: Vec<String>) -> Vec<String> {
+    items
+        .into_iter()
+        .map(|s| format!("[Processed: {s}]"))
+        .collect()
+}
+
+// ----------------------------------------------------------------------------
+// 2. Iterator Pipeline: iter() -> filter() -> map() -> take() -> collect()
+// ----------------------------------------------------------------------------
+
+pub fn build_lazy_pipeline(
+    numbers: &[i32],
+    is_even: bool,
+    multiplier: i32,
+    limit: usize,
+) -> Vec<i32> {
+    numbers
+        .iter()
+        .filter(|&&x| if is_even { x % 2 == 0 } else { x % 2 != 0 })
+        .map(|&x| x * multiplier)
+        .take(limit)
+        .collect()
+}
+
+// ----------------------------------------------------------------------------
+// 3. Consuming Adaptors: find, any, all, fold, collect
+// ----------------------------------------------------------------------------
+
+pub fn find_first_gt<'a>(numbers: &'a [i32], threshold: i32) -> Option<&'a i32> {
+    numbers.iter().find(|&&x| x > threshold)
+}
+
+pub fn verify_predicates(numbers: &[i32], min_val: i32) -> (bool, bool) {
+    let has_negative = numbers.iter().any(|&x| x < 0);
+    let all_above_min = numbers.iter().all(|&x| x >= min_val);
+    (has_negative, all_above_min)
+}
+
+pub fn calculate_stats_with_fold(numbers: &[i32]) -> (i32, i64) {
+    let sum = numbers.iter().fold(0, |acc, &x| acc + x);
+    let product = numbers.iter().fold(1i64, |acc, &x| acc * (x as i64));
+    (sum, product)
+}
+
+// ----------------------------------------------------------------------------
+// 4. Custom Iterator (Implementasi Trait Iterator Mandiri)
+// ----------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct Fibonacci {
+    pub curr: u64,
+    pub next: u64,
+}
+
+impl Fibonacci {
+    pub fn new() -> Self {
+        Self { curr: 0, next: 1 }
+    }
+}
+
+impl Default for Fibonacci {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Iterator for Fibonacci {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let new_next = self.curr.checked_add(self.next)?;
+        let result = self.curr;
+        self.curr = self.next;
+        self.next = new_next;
+        Some(result)
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 5. Runner Interaktif (Demonstrasi Lengkap)
+// ----------------------------------------------------------------------------
+
+pub fn run() {
+    println!("=== FASE 9: Functional Rust - Task 2 (Iterators) ===");
+
+    let source = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // 1. iter()
+    println!("\n1. Menggunakan .iter() [Immutable Borrow]:");
+    let doubled = demonstrate_iter(&source);
+    println!("   - Source tetap utuh: {:?}", source);
+    println!("   - Hasil doubled: {:?}", doubled);
+
+    // 2. iter_mut()
+    println!("\n2. Menggunakan .iter_mut() [Mutable Borrow In-Place]:");
+    let mut mutable_data = vec![10, 20, 30];
+    println!("   - Data sebelum: {:?}", mutable_data);
+    demonstrate_iter_mut(&mut mutable_data, 5);
+    println!("   - Data setelah (+5 in-place): {:?}", mutable_data);
+
+    // 3. into_iter()
+    println!("\n3. Menggunakan .into_iter() [Ownership Transfer]:");
+    let words = vec![
+        String::from("rust"),
+        String::from("iterator"),
+        String::from("zero-cost"),
+    ];
+    let processed_words = demonstrate_into_iter(words);
+    println!("   - Hasil into_iter: {:?}", processed_words);
+
+    // 4. Pipeline: iter() -> filter() -> map() -> take() -> collect()
+    println!("\n4. Pipeline Lazy: filter -> map -> take -> collect:");
+    let pipeline_res = build_lazy_pipeline(&source, true, 3, 3);
+    println!("   - Input numbers: {:?}", source);
+    println!("   - Filter Genap, Kali 3, Ambil 3: {:?}", pipeline_res);
+
+    // 5. find()
+    println!("\n5. Consuming Adaptor .find():");
+    let found = find_first_gt(&source, 7);
+    println!("   - Angka pertama > 7: {:?}", found);
+
+    // 6. any() dan all()
+    println!("\n6. Predikat .any() dan .all():");
+    let (has_neg, all_ge_zero) = verify_predicates(&source, 0);
+    println!("   - Mengandung angka negatif? {has_neg}");
+    println!("   - Semua angka >= 0? {all_ge_zero}");
+
+    // 7. fold()
+    println!("\n7. Reduksi .fold():");
+    let sample = [1, 2, 3, 4, 5];
+    let (sum, prod) = calculate_stats_with_fold(&sample);
+    println!("   - Data: {:?}", sample);
+    println!("   - Sum via fold: {sum}");
+    println!("   - Product via fold: {prod}");
+
+    // 8. Custom Iterator Fibonacci
+    println!("\n8. Custom Iterator (Fibonacci):");
+    let fib_first_8: Vec<u64> = Fibonacci::new().take(8).collect();
+    println!("   - 8 angka pertama Fibonacci: {:?}", fib_first_8);
+
+    println!("\n[OK] Task 2 Iterators selesai & terverifikasi.");
+}
+```
+
+---
+
+#### 9.2.7 Hasil Eksekusi Output Terminal Task 2
+
+```text
+=== FASE 9: Functional Rust - Task 2 (Iterators) ===
+
+1. Menggunakan .iter() [Immutable Borrow]:
+   - Source tetap utuh: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+   - Hasil doubled: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+
+2. Menggunakan .iter_mut() [Mutable Borrow In-Place]:
+   - Data sebelum: [10, 20, 30]
+   - Data setelah (+5 in-place): [15, 25, 35]
+
+3. Menggunakan .into_iter() [Ownership Transfer]:
+   - Hasil into_iter: ["[Processed: rust]", "[Processed: iterator]", "[Processed: zero-cost]"]
+
+4. Pipeline Lazy: filter -> map -> take -> collect:
+   - Input numbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+   - Filter Genap, Kali 3, Ambil 3: [6, 12, 18]
+
+5. Consuming Adaptor .find():
+   - Angka pertama > 7: Some(8)
+
+6. Predikat .any() dan .all():
+   - Mengandung angka negatif? false
+   - Semua angka >= 0? true
+
+7. Reduksi .fold():
+   - Data: [1, 2, 3, 4, 5]
+   - Sum via fold: 15
+   - Product via fold: 120
+
+8. Custom Iterator (Fibonacci):
+   - 8 angka pertama Fibonacci: [0, 1, 1, 2, 3, 5, 8, 13]
+
+[OK] Task 2 Iterators selesai & terverifikasi.
+```
+
+---
+
+### 9.3 Mini Project Fase 9: Statistics Processor (Arsitektur Pipeline Fungsional)
+
+Mini Project Fase 9 menggabungkan seluruh konsep closure dan iterator ke dalam sistem pengolah statistik numerik yang idiomatic, aman, dan deklaratif. Tanpa loop `for` manual, seluruh kalkulasi dilakukan menggunakan pipeline iterator adaptors yang bersih dan efisien (*zero-cost abstraction*).
+
+---
+
+#### 9.3.1 Analisis Desain Pipeline & 7 Metrik Statistik
+
+Sistem memproses input data `[10, 20, 11, 30, 40, 21, 50]` untuk menghasilkan 7 indikator statistik utama:
+
+1. **Angka Genap (`filter`)**:
+   - `data.iter().copied().filter(|&x| x % 2 == 0).collect()`
+   - Hasil: `[10, 20, 30, 40, 50]`
+2. **Angka di Atas Ambang Batas / Threshold (`filter`)**:
+   - Menggunakan closure yang menangkap variabel `threshold`: `data.iter().copied().filter(|&x| x > threshold).collect()`
+   - Untuk threshold = 25, hasil: `[30, 40, 50]`
+3. **Square / Kuadrat (`map`)**:
+   - `data.iter().map(|&x| (x as i64) * (x as i64)).collect()`
+   - Dikonversi ke `i64` untuk mencegah overflow integer.
+   - Hasil: `[100, 400, 121, 900, 1600, 441, 2500]`
+4. **Sum / Total Penjumlahan (`sum`)**:
+   - `data.iter().map(|&x| x as i64).sum()`
+   - Total: `182`
+5. **Average / Rata-rata (`f64` division & `Option`)**:
+   - Menghindari *panic zero-division* dengan membungkus hasil dalam `Option<f64>`. Jika slice kosong, mengembalikan `None`.
+   - Hasil: `Some(26.00)`
+6. **Maximum (`max`)**:
+   - Menggunakan iterator consuming adaptor `.max()`, mengembalikan `Option<i32>`.
+   - Hasil: `Some(50)`
+7. **Minimum (`min`)**:
+   - Menggunakan iterator consuming adaptor `.min()`, mengembalikan `Option<i32>`.
+   - Hasil: `Some(10)`
+
+---
+
+#### 9.3.2 Pembuktian & Evaluasi Kriteria Lulus Fase 9
+
+Untuk memastikan kelulusan Fase 9, tiga pengujian fundamental diuji secara komputasional:
+
+1. **Membedakan 3 Mode Iterasi**:
+   - `.iter()`: Meminjam immutable (`&T`). Koleksi asal tetap utuh dan valid.
+   - `.iter_mut()`: Meminjam mutable (`&mut T`). Mengubah elemen langsung secara in-place.
+   - `.into_iter()`: Mengambil ownership (`T`). Koleksi asal dikonsumsi / dipindahkan.
+
+2. **Membuktikan Karakteristik Laziness Iterator**:
+   - Disusun pipeline `numbers.iter().map(...)` dengan counter pemantau langkah.
+   - Sebelum terminal method dipanggil, counter langkah bernilai `0` (tidak ada komputasi yang jalan!).
+   - Saat dipanggil `.take(2).collect()`, hanya **2 langkah** yang dieksekusi, meskipun array berisi 5 elemen. Komputasi hanya dilakukan sesuai kebutuhan (*pull-based*).
+
+3. **Membuktikan 3 Kategori Trait Closure (`Fn`, `FnMut`, `FnOnce`)**:
+   - `Fn`: Closure hanya membaca variabel lingkungan (`greeting.len()`). Aman dipanggil berkali-kali.
+   - `FnMut`: Closure memutasi state luar (`counter += 5`). Variabel closure wajib `let mut`.
+   - `FnOnce`: Closure mengonsumsi data via ownership move (`data.into_iter().sum()`). Hanya bisa dieksekusi satu kali.
+
+---
+
+#### 9.3.3 Implementasi Kode Lengkap `mini_project_9.rs`
+
+Berikut adalah kode sumber lengkap yang telah diuji dan diintegrasikan pada `rust-learning-lab/src/mini_project_9.rs`:
+
+```rust
+// Mini Project Fase 9: Statistics Processor (Functional Rust: Closures & Iterators)
+// Rujukan: rust_learning_guide.md (Sub-bab 9.3) & rust_execution_tasks.md (L826-L849)
+
+use std::fmt::{self, Display, Formatter};
+
+/// Laporan Statistik Lengkap hasil kalkulasi functional iterator pipeline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatisticsReport {
+    pub source: Vec<i32>,
+    pub evens: Vec<i32>,
+    pub threshold: i32,
+    pub above_threshold: Vec<i32>,
+    pub squares: Vec<i64>,
+    pub sum: i64,
+    pub average: Option<f64>,
+    pub maximum: Option<i32>,
+    pub minimum: Option<i32>,
+}
+
+impl Display for StatisticsReport {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        writeln!(f, "--- Statistics Processor Report ---")?;
+        writeln!(f, "Input Data         : {:?}", self.source)?;
+        writeln!(f, "1. Angka Genap     : {:?}", self.evens)?;
+        writeln!(
+            f,
+            "2. Angka > {} (th) : {:?}",
+            self.threshold, self.above_threshold
+        )?;
+        writeln!(f, "3. Square (Kuadrat): {:?}", self.squares)?;
+        writeln!(f, "4. Sum (Jumlah)    : {}", self.sum)?;
+        match self.average {
+            Some(avg) => writeln!(f, "5. Average (Rata)  : {avg:.2}")?,
+            None => writeln!(f, "5. Average (Rata)  : N/A (Koleksi Kosong)")?,
+        }
+        match self.maximum {
+            Some(max) => writeln!(f, "6. Maximum         : {max}")?,
+            None => writeln!(f, "6. Maximum         : N/A")?,
+        }
+        match self.minimum {
+            Some(min) => write!(f, "7. Minimum         : {min}"),
+            None => write!(f, "7. Minimum         : N/A"),
+        }
+    }
+}
+
+/// Mesin Pemroses Statistik Berbasis Iterator & Closure.
+#[derive(Debug, Clone)]
+pub struct StatisticsProcessor {
+    data: Vec<i32>,
+}
+
+impl StatisticsProcessor {
+    pub fn new(data: Vec<i32>) -> Self {
+        Self { data }
+    }
+
+    pub fn as_slice(&self) -> &[i32] {
+        &self.data
+    }
+
+    pub fn evens(&self) -> Vec<i32> {
+        self.data.iter().copied().filter(|&x| x % 2 == 0).collect()
+    }
+
+    pub fn above_threshold(&self, threshold: i32) -> Vec<i32> {
+        self.data.iter().copied().filter(|&x| x > threshold).collect()
+    }
+
+    pub fn squares(&self) -> Vec<i64> {
+        self.data
+            .iter()
+            .map(|&x| (x as i64) * (x as i64))
+            .collect()
+    }
+
+    pub fn sum(&self) -> i64 {
+        self.data.iter().map(|&x| x as i64).sum()
+    }
+
+    pub fn average(&self) -> Option<f64> {
+        if self.data.is_empty() {
+            None
+        } else {
+            Some(self.sum() as f64 / self.data.len() as f64)
+        }
+    }
+
+    pub fn maximum(&self) -> Option<i32> {
+        self.data.iter().copied().max()
+    }
+
+    pub fn minimum(&self) -> Option<i32> {
+        self.data.iter().copied().min()
+    }
+
+    pub fn generate_report(&self, threshold: i32) -> StatisticsReport {
+        StatisticsReport {
+            source: self.data.clone(),
+            evens: self.evens(),
+            threshold,
+            above_threshold: self.above_threshold(threshold),
+            squares: self.squares(),
+            sum: self.sum(),
+            average: self.average(),
+            maximum: self.maximum(),
+            minimum: self.minimum(),
+        }
+    }
+
+    pub fn custom_filter<F>(&self, predicate: F) -> Vec<i32>
+    where
+        F: Fn(&i32) -> bool,
+    {
+        self.data.iter().copied().filter(predicate).collect()
+    }
+
+    pub fn custom_transform<U, F>(&self, mapper: F) -> Vec<U>
+    where
+        F: Fn(i32) -> U,
+    {
+        self.data.iter().copied().map(mapper).collect()
+    }
+}
+
+pub fn verify_iteration_modes() -> (&'static str, &'static str, &'static str) {
+    let mode_iter = "iter(): meminjam immutable (&T), koleksi asal tetap utuh.";
+    let mode_iter_mut = "iter_mut(): meminjam mutable (&mut T), mutasi elemen in-place.";
+    let mode_into_iter = "into_iter(): mengonsumsi koleksi (T), ownership dipindahkan.";
+    (mode_iter, mode_iter_mut, mode_into_iter)
+}
+
+pub fn verify_iterator_laziness() -> usize {
+    use std::cell::Cell;
+    let step_count = Cell::new(0);
+    let numbers = [1, 2, 3, 4, 5];
+
+    let pipeline = numbers.iter().map(|&x| {
+        step_count.set(step_count.get() + 1);
+        x * 2
+    });
+
+    assert_eq!(step_count.get(), 0);
+
+    let _: Vec<_> = pipeline.take(2).collect();
+    step_count.get()
+}
+
+pub fn verify_closure_traits() -> (&'static str, i32, usize) {
+    let greeting = String::from("Halo");
+    let fn_read = || greeting.len();
+    let res_fn = fn_read();
+
+    let mut counter = 10;
+    let mut fn_mut = || {
+        counter += 5;
+        counter
+    };
+    let res_fn_mut = fn_mut();
+
+    let data = vec![100, 200, 300];
+    let fn_once = move || data.into_iter().sum::<i32>();
+    let res_fn_once = fn_once();
+
+    ("Fn: baca saja", res_fn_mut, res_fn + (res_fn_once as usize))
+}
+
+pub fn run() {
+    println!("=== Mini Project Fase 9: Statistics Processor ===");
+
+    let sample_input = vec![10, 20, 11, 30, 40, 21, 50];
+    let processor = StatisticsProcessor::new(sample_input);
+    let threshold = 25;
+
+    let report = processor.generate_report(threshold);
+    println!("{report}");
+
+    let slice_len = processor.as_slice().len();
+    let multiples_of_10 = processor.custom_filter(|&x| x % 10 == 0);
+    let labels: Vec<String> = processor.custom_transform(|x| format!("N:{x}"));
+    println!("\nCustom Pipeline Demo (slice length: {slice_len}):");
+    println!("   - Kelipatan 10: {:?}", multiples_of_10);
+    println!("   - Format Label: {:?}", labels);
+
+    println!("\n--- Evaluasi & Bukti Kriteria Lulus Fase 9 ---");
+    let (m1, m2, m3) = verify_iteration_modes();
+    println!("1. Pemahaman Mode Iterasi:");
+    println!("   - {m1}");
+    println!("   - {m2}");
+    println!("   - {m3}");
+
+    let executed_steps = verify_iterator_laziness();
+    println!("\n2. Bukti Laziness Iterator:");
+    println!("   - Diprogram untuk ambil 2 elemen (take(2)) dari 5.");
+    println!("   - Jumlah langkah eksekusi aktual: {executed_steps} langkah (bukan 5!).");
+
+    let (c1, c2, c3) = verify_closure_traits();
+    println!("\n3. Bukti Kategori Fn / FnMut / FnOnce:");
+    println!("   - {c1}");
+    println!("   - FnMut mutasi counter: {c2}");
+    println!("   - FnOnce mengonsumsi Vec: checksum = {c3}");
+
+    println!("\n[OK] Mini Project Fase 9 selesai & terverifikasi.");
+}
+```
+
+---
+
+#### 9.3.4 Hasil Eksekusi Output Terminal Mini Project 9
+
+```text
+=== Mini Project Fase 9: Statistics Processor ===
+--- Statistics Processor Report ---
+Input Data         : [10, 20, 11, 30, 40, 21, 50]
+1. Angka Genap     : [10, 20, 30, 40, 50]
+2. Angka > 25 (th) : [30, 40, 50]
+3. Square (Kuadrat): [100, 400, 121, 900, 1600, 441, 2500]
+4. Sum (Jumlah)    : 182
+5. Average (Rata)  : 26.00
+6. Maximum         : 50
+7. Minimum         : 10
+
+Custom Pipeline Demo (slice length: 7):
+   - Kelipatan 10: [10, 20, 30, 40, 50]
+   - Format Label: ["N:10", "N:20", "N:11", "N:30", "N:40", "N:21", "N:50"]
+
+--- Evaluasi & Bukti Kriteria Lulus Fase 9 ---
+1. Pemahaman Mode Iterasi:
+   - iter(): meminjam immutable (&T), koleksi asal tetap utuh.
+   - iter_mut(): meminjam mutable (&mut T), mutasi elemen in-place.
+   - into_iter(): mengonsumsi koleksi (T), ownership dipindahkan.
+
+2. Bukti Laziness Iterator:
+   - Diprogram untuk ambil 2 elemen (take(2)) dari 5.
+   - Jumlah langkah eksekusi aktual: 2 langkah (bukan 5!).
+
+3. Bukti Kategori Fn / FnMut / FnOnce:
+   - Fn: baca saja
+   - FnMut mutasi counter: 15
+   - FnOnce mengonsumsi Vec: checksum = 604
+
+[OK] Mini Project Fase 9 selesai & terverifikasi.
 ```
 
 ---
@@ -6098,162 +7206,2320 @@ fn iterator_pipeline() {
 
 ## FASE 10: Smart Pointers & Interior Mutability
 
-### 10.1 Alur Pedagogis Struktur Memori
-1. **References (`&T`, `&mut T`)**: Pointer dasar dengan borrow check saat compile-time.
-2. **`Box<T>`**: Mengalokasikan nilai di Heap, memegang pointer di Stack. Berguna untuk recursive types berukuran dinamis.
-3. **`Deref` & `Drop` Traits**: Memungkinkan pointer transparan saat diakses (`*ptr`) dan otomatis melepaskan alokasi saat keluar scope.
-4. **`Rc<T>`**: Reference Counting untuk kepemilikan bersama (*shared ownership*) pada lingkungan **single-thread**.
-5. **`RefCell<T>` & Interior Mutability**: Mengizinkan mutasi data di balik referensi immutable (`&self`), dengan aturan borrowing diperiksa saat **runtime** (panic jika ada 2 mutable borrow bersamaan).
-6. **`Arc<T>` (Atomic Reference Counting)**: Versi thread-safe dari `Rc<T>` untuk berbagi kepemilikan lintas thread OS.
-7. **`Mutex<T>` & `RwLock<T>`**: Sinkronisasi kunci akses data bersama lintas thread.
+### 10.1 Konsep Fundamental Smart Pointer & Alur Pedagogis Memori
+
+Di Rust, perbedaan antara *reference* biasa dan *smart pointer* terletak pada kemampuan pengelolaan kepemilikan (*ownership*), metadata tambahan, dan implementasi dua trait kunci: `Deref` dan `Drop`.
+
+| Jenis Pointer | Kepemilikan (*Ownership*) | Lokasi Target | Overhead Runtime | Trait Kunci | Kasus Penggunaan Utama |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Reference (`&T`, `&mut T`)** | Tidak (hanya meminjam) | Stack atau Heap | Zero-cost (pointer mentah) | Copy | Akses memori sementara tanpa alokasi baru. |
+| **`Box<T>`** | Ya (eksklusif / single owner) | Heap | Sangat kecil (alokasi heap) | `Deref`, `Drop` | Ukuran dinamis/rekursif, hindari stack copy data besar. |
+| **`Rc<T>`** | Ya (shared / reference counted) | Heap | Increment/decrement counter | `Deref`, `Drop` | Multi-ownership pada thread tunggal (*single-thread*). |
+| **`Arc<T>`** | Ya (atomic shared ownership) | Heap | Atomic memory ordering | `Deref`, `Drop` | Multi-ownership aman lintas thread OS (*concurrency*). |
+| **`RefCell<T>`** | Mengelola mutabilitas interior | Stack / Heap | Runtime borrow checking | `Deref`, `Drop` | Mutasi data di balik `&T` (aturan borrow dicek runtime). |
+| **`Mutex<T>` / `RwLock<T>`** | Mengunci akses data | Stack / Heap | Lock syscall / futex | `Deref`, `Drop` | Akses mutasi aman lintas thread secara sinkron. |
+
+---
+
+### 10.2 `Box<T>`: Heap Allocation & Analisis Memori Stack vs Heap
+
+`Box<T>` adalah smart pointer paling sederhana di Rust. Box mengalokasikan data ke memori **Heap**, sementara pointer alamatnya disimpan di **Stack**.
+
+#### 1. Visualisasi Memori Stack vs Heap
+
+Ketika Anda menulis `let b = Box::new(42);`:
+
+```text
+┌───────────────────────────┐                ┌───────────────────────────┐
+│        STACK MEMORY       │                │        HEAP MEMORY        │
+│                           │                │                           │
+│  Variabel `b`             │                │  Payload Nilai Sebenarnya │
+│  ┌─────────────────────┐  │                │  ┌─────────────────────┐  │
+│  │ Pointer: 0x7ffd9a00 ├──┼───────────────┼─>│ Nilai i32: 42       │  │
+│  │ Ukuran: 8 bytes     │  │ (Menunjuk ke)  │  │ Ukuran: 4 bytes     │  │
+│  └─────────────────────┘  │                │  └─────────────────────┘  │
+└───────────────────────────┘                └───────────────────────────┘
+```
+
+- **Ukuran di Stack**: Pada arsitektur 64-bit, ukuran variabel `Box<T>` di stack selalu tepat **8 bytes** (`usize`), apapun tipe `T` di dalamnya.
+- **Ukuran di Heap**: Memori di heap dialokasikan persis sebesar `size_of::<T>()`.
+- **Otomatis Bebas (Zero Memory Leak)**: Ketika variabel `b` keluar dari scope (*out of scope*), trait `Drop` otomatis dipanggil untuk membebaskan (*deallocate*) memori di heap tanpa perlu memanggil `free()` manual seperti di C.
+
+#### 2. Kapan Menggunakan `Box<T>`?
+1. **Mencegah Stack Overflow untuk Data Berukuran Besar**:
+   Stack thread biasanya dibatasi (misal 2 MB di Linux). Jika membuat array `[u8; 1024 * 1024]` (1 MB) langsung di stack, beberapa frame fungsi dapat menyebabkan stack overflow. Dengan `Box`, data 1 MB tersebut hidup aman di Heap.
+2. **Transfer Kepemilikan Cepat Tanpa Copy Memori Besar**:
+   Memindahkan (*move*) `Box<LargeBuffer>` antar-fungsi hanya menyalin pointer 8 byte di stack, bukan menyalin seluruh payload megabyte di heap.
+3. **Recursive Types**: Menyediakan ukuran tipe yang pasti pada waktu kompilasi (*compile-time sized*).
+4. **Trait Objects (`Box<dyn Trait>`)**: Menyimpan berbagai tipe berbeda yang mengimplementasikan trait yang sama dalam satu koleksi (polimorfisme dinamis).
+
+---
+
+### 10.3 Recursive Types: Masalah Ukuran Kompilasi (`Sized`) & Solusi Indirection
+
+#### 1. Apa Itu Tipe Data Rekursif? (Mental Model Ramah Pemula)
+**Tipe data rekursif** adalah tipe data yang **di dalam dirinya memuat nilai dari tipe dirinya sendiri**.
+
+* **Analogi Boneka Rusia (Matryoshka)**:
+  Buka satu boneka besar $\to$ di dalamnya ada boneka yang sama $\to$ buka lagi ada boneka lagi $\to$ sampai ke boneka terkecil (ujung dasar/basis).
+* **Analogi Folder di Komputer**:
+  Sebuah `Folder` bisa berisi file, namun juga bisa berisi `Folder` lain di dalamnya.
+* **Analogi Gerbong Kereta (Linked List)**:
+  Setiap gerbong membawa muatan dan **menggandeng gerbong berikutnya** (yang tipenya sama-sama gerbong), hingga gerbong terakhir yang tidak menggandeng apapun (`Nil`).
+* **Pohon Ekspresi Matematika (AST)**:
+  Ekspresi `(10 + 5) * 4` adalah operasi perkalian (`Expr::Mul`) yang memiliki dua anak: anak kiri adalah penjumlahan (`Expr::Add`), anak kanan adalah angka (`Expr::Number`). Keduanya sama-sama bertipe `Expr`.
+
+#### 2. Mengapa Compiler Rust Menolak Tipe Rekursif Tanpa Pointer?
+Rust harus mengetahui ukuran setiap tipe data pada waktu kompilasi (*compile-time*) agar dapat mengalokasikan memori stack frame dengan tepat.
+
+Bayangkan definisi linked list rekursif naif berikut:
+```rust
+// GAGAL COMPILE! Error E0072: recursive type has infinite size
+enum List {
+    Cons(i32, List),
+    Nil,
+}
+```
+Berapa ukuran `List` di Stack?
+- `List` butuh ruang untuk `i32` + `List`.
+- Tetapi `List` di dalamnya butuh ruang untuk `i32` + `List` lagi...
+- Hal ini berulang tanpa batas $\to$ **ukuran tak terhingga (*infinite size*)!** Compiler bingung harus memesan ruang berapa byte di Stack.
+
+#### 3. Solusi: Indirection Menggunakan `Box<T>`
+Dengan membungkus anak rekursif dalam `Box<List<T>>`:
+```rust
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum List<T> {
+    Cons(T, Box<List<T>>),
+    Nil,
+}
+```
+Sekarang compiler tahu pasti:
+- Varian `Cons` berukuran: `size_of::<T>()` + `size_of::<usize>()` (8 byte pointer Box) + padding alignment.
+- Ukurannya kini **terbatas dan pasti**.
+
+#### Implementasi Nyata 1: Functional Cons List
+Pada file `fase10_task_1.rs`, kita membangun struktur linked list fungsional lengkap:
+- `prepend(elem)`: Menambahkan node baru di depan dalam waktu $O(1)$.
+- `len()`: Menghitung total simpul secara iteratif melalui traversing pointer heap.
+- `to_vec()`: Mengonversi rantai linked list menjadi `Vec<T>`.
+
+#### Implementasi Nyata 2: Abstract Syntax Tree (AST) untuk Evaluasi Ekspresi
+Struktur rekursif sangat krusial dalam pembuatan parser, compiler, dan kalkulator ekspresi:
+```rust
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Expr {
+    Number(i64),
+    Add(Box<Expr>, Box<Expr>),
+    Sub(Box<Expr>, Box<Expr>),
+    Mul(Box<Expr>, Box<Expr>),
+    Div(Box<Expr>, Box<Expr>),
+}
+```
+Setiap operasi biner (`Add`, `Sub`, `Mul`, `Div`) menyimpan dua sub-pohon `Box<Expr>`. Method `eval()` mengevaluasi ekspresi secara rekursif dan memproteksi pembagian dengan angka nol (*zero-division error*).
+
+---
+
+### 10.4 Dereferencing `Box<T>`, Trait `Deref` & Deref Coercion
+
+#### 1. Operator Dereference (`*`)
+Untuk mengakses atau memutasi nilai asli yang berada di dalam Heap:
+```rust
+let mut b = Box::new(100);
+*b += 50; // Mengubah nilai 100 menjadi 150 di heap
+assert_eq!(*b, 150);
+```
+
+#### 2. Unboxing (Memindahkan Nilai Keluar dari Box)
+Jika tipe data `T` memiliki ukuran tetap (`Sized`), kita dapat memindahkan kepemilikannya keluar dari Box ke stack frame lokal:
+```rust
+let b = Box::new(String::from("Rust"));
+let s: String = *b; // Nilai String dipindahkan (moved) keluar dari Box heap
+```
+
+#### 3. Trait `std::ops::Deref` dan `DerefMut`
+Rust mengizinkan tipe kustom bertindak seperti pointer melalui trait `Deref`:
+```rust
+pub trait Deref {
+    type Target: ?Sized;
+    fn deref(&self) -> &Self::Target;
+}
+```
+Ketika menulis `*b`, di balik layar compiler Rust mengeksekusi:
+```rust
+*(b.deref())
+```
+
+#### 4. Deref Coercion: Kemudahan Tanpa Boilerplate
+*Deref Coercion* adalah fitur ergonomis compiler Rust yang mengonversi referensi suatu tipe yang mengimplementasikan `Deref` ke referensi tipe targetnya secara otomatis:
+- `&Box<String>` $\to$ `&String` $\to$ `&str`
+- `&Box<Vec<T>>` $\to$ `&Vec<T>` $\to$ `&[T]`
+
+Contoh:
+```rust
+fn greet(name: &str) { ... }
+
+let boxed_name = Box::new(String::from("Rustacean"));
+// Deref coercion otomatis mengubah &Box<String> menjadi &str:
+greet(&boxed_name);
+```
+
+---
+
+### 10.5 Box untuk Trait Objects (`Box<dyn Trait>`) & Dynamic Dispatch
+
+Ketika kita ingin menyimpan kumpulan objek berbeda dalam satu koleksi seragam (*heterogeneous collection*):
+```rust
+pub trait Renderable {
+    fn render(&self) -> String;
+}
+
+// Koleksi heterogen yang menampung Header, Paragraph, CodeBlock:
+let doc: Vec<Box<dyn Renderable>> = vec![
+    Box::new(Header { text: "Judul".into() }),
+    Box::new(Paragraph { content: "Isi paragraf".into() }),
+];
+```
+- **Fat Pointer**: `Box<dyn Trait>` terdiri dari 2 pointer (total 16 bytes):
+  1. Pointer ke alamat data objek aktual di heap.
+  2. Pointer ke tabel fungsi virtual (**vtable**) untuk memanggil method yang sesuai saat runtime (*dynamic dispatch*).
+
+---
+
+### 10.6 Kode Implementasi Modul: `fase10_task_1.rs`
+
+Seluruh konsep di atas diuji dan diverifikasi secara komprehensif pada file:
+`rust-learning-lab/src/fase10_task_1.rs`
 
 ```rust
-use std::sync::{Arc, Mutex, RwLock};
-use std::cell::RefCell;
-use std::rc::Rc;
+// Jalankan modul melalui binary:
+// cargo run
+// Atau jalankan unit test khusus modul ini:
+// cargo test --bin rust-learning-lab -- fase10_task_1
+```
 
-fn smart_pointers_summary() {
-    // Heap Box
-    let b = Box::new(1024);
+Hasil eksekusi program:
+```text
+=== FASE 10 TASK 1: SMART POINTER BOX<T> ===
 
-    // Single-thread shared mutability: Rc<RefCell<T>>
-    let local_state = Rc::new(RefCell::new(0));
-    *local_state.borrow_mut() += 1;
+1. Heap Allocation & Ukuran Memori:
+   - Nilai dalam Box: 42
+   - Ukuran variabel Box di Stack: 8 bytes (pointer 64-bit)
+   - Ukuran payload nilai di Heap: 4 bytes
+   - LargeBuffer (1 MB) sukses dialokasikan di Heap. Byte pertama: 7
 
-    // Multi-thread shared mutability: Arc<Mutex<T>> atau Arc<RwLock<T>>
-    let shared_state = Arc::new(RwLock::new(vec![1, 2, 3]));
-    {
-        let mut write_guard = shared_state.write().unwrap();
-        write_guard.push(4);
-    } // write lock dilepas otomatis di sini
+2. Recursive Type: Cons List (Linked List):
+   - List berhasil dibentuk: Cons(10, Cons(20, Cons(30, Nil)))
+   - Panjang list: 3 (is_empty: false)
+   - Representasi Vec: [10, 20, 30]
+
+3. Recursive Type: Abstract Syntax Tree (AST):
+   - Kedalaman pohon ekspresi AST: 4
+   - Hasil evaluasi AST ((10+5)*4) - (50/2) = 35
+   - Uji pembagian dengan nol: Err("Peringatan: Pembagian dengan angka nol!")
+
+4. Dereferencing & Deref Coercion:
+   - Nilai awal: 100
+   - Nilai setelah mutasi via deref: 150
+   - Nilai setelah unboxing (move out): 150
+   - Deref coercion string: Halo, Rustacean!
+   - Deref coercion slice: sum = 15
+   - Custom MyBox DerefMut hasil: Hello World
+
+5. Box<dyn Trait> Heterogeneous Collection:
+   Rendered document:
+# Dokumentasi Smart Pointer
+
+<p>Box<T> adalah smart pointer paling sederhana di Rust.</p>
+
+```rust
+let b = Box::new(42);
+```
+
+[OK] Task Fase 10 (Box) selesai & terverifikasi.
+```
+
+---
+
+### 10.7 Smart Pointer `Rc<T>` (Reference Counting & Shared Ownership)
+
+Secara default, aturan ownership Rust menegaskan: **Satu nilai hanya memiliki TEPAT SATU pemilik tunggal (*single owner*)**. Ketika pemilik keluar dari scope, nilai tersebut dihancurkan.
+
+Namun, dalam struktur data tertentu (seperti Grafik, Node Pohon dengan banyak orang tua / *multi-parent DAG*, atau state konfigurasi bersama), satu data di Heap perlu dimiliki secara sah oleh **banyak pemilik sekaligus** tanpa menduplikasi isi memori (*zero deep-copy*). Inilah peran dari `Rc<T>` (*Reference Counted*).
+
+---
+
+#### 10.7.0 Mental Model & Analogi Ramah Pemula: "TV Ruang Tengah Kosan"
+
+Bagi pemula yang baru belajar Rust, konsep `Rc<T>` sering membingungkan jika hanya melihat istilah teknisnya. Mari kita pahami dengan analogi kehidupan nyata:
+
+##### 1. Masalah Kepemilikan Biasa di Rust: "Hanya Boleh Ada 1 Pemilik"
+Secara default di Rust, satu data hanya boleh dimiliki oleh **tepat satu variabel**. Begitu pemiliknya keluar dari scope `{ }`, datanya **langsung dibuang dari RAM**.
+
+Contoh masalah dengan `Box<T>`:
+```rust
+let budi = Box::new(String::from("TV Kosan"));
+
+// Ani mau ikut punya TV yang sama:
+let ani = budi; // KEPEMILIKAN PINDAH (MOVE)!
+// Sekarang Budi TIDAK BISA nonton TV lagi! (Compiler error: value borrowed after move)
+```
+
+Jika kita ingin Budi dan Ani sama-sama bisa memiliki TV tanpa `Rc`, kita terpaksa menduplikasi datanya via `.clone()`:
+```rust
+let ani = budi.clone(); // Membeli TV baru di RAM (Alokasi Heap baru!)
+```
+Jika data tersebut berukuran 500 MB, RAM langsung bengkak jadi 1000 MB!
+
+##### 2. Solusi `Rc<T>`: TV Bersama + Papan Catatan Penonton
+`Rc` singkatan dari **Reference Counting** (Penghitung Referensi).
+
+Bayangkan TV ditaruh di ruang tengah kosan. Di samping TV ada **papan catatan kecil** (`strong_count`):
+
+```text
+┌──────────────────────────────────────────────┐
+│                  MEMORI HEAP                 │
+│                                              │
+│   Papan Catatan: [ strong_count = 3 ]        │
+│   Barang Asli  : "TV Bersama"                │
+└──────────────────────────────────────────────┘
+         ▲               ▲              ▲
+         │               │              │
+    Remote Budi     Remote Ani     Remote Caca
+```
+
+1. **Budi beli TV kosan**:
+   ```rust
+   let budi = Rc::new(String::from("TV Bersama"));
+   // Di papan catatan tertulis: strong_count = 1
+   ```
+2. **Ani ikut bergabung**:
+   ```rust
+   let ani = Rc::clone(&budi);
+   // Di papan catatan tertulis: strong_count = 2
+   ```
+   *Catatan penting*: `Rc::clone` **BUKAN** meng-copy TV-nya! Komputer hanya menambah angka di papan catatan ($+1$) dan memberikan "remote control" (pointer stack 8 byte) baru ke Ani. Sangat cepat dan hemat memori!
+3. **Caca ikut bergabung**:
+   ```rust
+   let caca = Rc::clone(&budi);
+   // Di papan catatan tertulis: strong_count = 3
+   ```
+
+##### 3. Kapan TV-nya Dihapus dari RAM?
+Kuncinya: **Data di Heap TIDAK AKAN DIHAPUS selama masih ada yang memakai (`strong_count > 0`)**.
+- **Budi lulus & pindah kos**: Variabel `budi` selesai $\to$ Angka di papan turun: `strong_count = 2`. TV **belum dihapus** karena Ani dan Caca masih ada di kosan.
+- **Ani pindah kos**: Variabel `ani` selesai $\to$ Angka di papan turun: `strong_count = 1`. TV **belum dihapus** karena Caca masih nonton.
+- **Caca pindah kos (orang terakhir)**: Variabel `caca` selesai $\to$ Angka di papan jadi: `strong_count = 0`. Sekarang sudah tidak ada penonton sama sekali $\to$ Rust otomatis mematikan dan membebaskan TV dari RAM (`Drop`). **Zero Memory Leak!**
+
+##### 4. Rangkuman Pertanyaan Kunci
+| Pertanyaan | Jawaban Ramah Pemula |
+| :--- | :--- |
+| **Apa itu `Rc<T>`?** | Smart pointer untuk **berbagi 1 data ke banyak pemilik** secara hemat di 1 thread. |
+| **Kenapa tidak pakai `Box<T>`?** | `Box` cuma membolehkan 1 pemilik tunggal. Kalau di-share harus menduplikasi data di heap. |
+| **Apa fungsi `Rc::clone`?** | Bukan meng-copy isi data, cuma **menambah angka penghitung ($+1$)** dan membagikan pointer. |
+| **Kapan data di-drop?** | Otomatis saat **semua pemilik sudah selesai** (`strong_count == 0`). |
+| **Kenapa single-thread?** | Papan hitungannya memakai operasi non-atomic agar super cepat, sehingga tidak aman untuk multi-thread (gunakan `Arc` untuk multi-thread). |
+
+---
+
+#### 10.7.1 Analisis Memori: `Rc<T>` di Balik Layar
+
+Ketika Anda membungkus nilai dalam `Rc::new(data)`, Rust mengalokasikan memori Heap yang memuat:
+1. **Nilai Asli (`Value T`)**: Payload data sebenarnya.
+2. **`strong_count`**: Jumlah pointer aktif yang memegang kepemilikan nilai ini.
+3. **`weak_count`**: Jumlah referensi lemah (*weak references*) yang mengamati nilai ini.
+
+```text
+┌───────────────────────────┐
+│        STACK MEMORY       │
+│                           │
+│  Variabel `data_a`        │
+│  ┌─────────────────────┐  │
+│  │ Pointer: 0x5f24bb63 ├──┼───────────────┐
+│  └─────────────────────┘  │               │
+│                           │               │
+│  Variabel `data_b`        │               │         ┌──────────────────────────────────────┐
+│  ┌─────────────────────┐  │               │         │             HEAP MEMORY              │
+│  │ Pointer: 0x5f24bb63 ├──┼───────────────┼────────>│  ┌──────────────┬──────────────────┐  │
+│  └─────────────────────┘  │ (Menunjuk ke  │         │  │ strong_count: 2                 │  │
+│                           │  alamat sama) │         │  ├──────────────┼──────────────────┤  │
+│  Variabel `data_c`        │               │         │  │ weak_count:   0                 │  │
+│  ┌─────────────────────┐  │               │         │  ├──────────────┴──────────────────┤  │
+│  │ Pointer: 0x5f24bb63 ├──┼───────────────┘         │  │ Payload: TrackedData ("Config") │  │
+│  └─────────────────────┘  │                         │  └─────────────────────────────────┘  │
+└───────────────────────────┘                         └──────────────────────────────────────┘
+```
+
+- **Operasi `Rc::clone(&rc)`**:
+  - **TIDAK melakukan deep-copy data heap!**
+  - Hanya menyalin pointer stack 8 byte dan menaikkan angka `strong_count` sebesar $+1$.
+  - Biaya performanya sangat murah ($O(1)$).
+  - *Konvensi Idiomatik Rust*: Gunakan `Rc::clone(&data)` alih-alih `data.clone()` agar terlihat jelas bagi pembaca kode bahwa kita hanya menggandakan pointer smart pointer, bukan menyalin seluruh payload data.
+
+- **Operasi `Drop` Otomatis**:
+  - Setiap kali salah satu variabel `Rc` keluar dari scope, method `drop` otomatis menurunkan `strong_count` sebesar $-1$.
+  - Hanya ketika `strong_count == 0`, memori payload di heap beserta metadata ref-count benar-benar dibebaskan (*deallocated*).
+
+---
+
+#### 10.7.2 Mengapa `Rc<T>` Hanya untuk Single-Thread?
+
+- `Rc<T>` memodifikasi `strong_count` menggunakan instruksi aritmatika CPU biasa (non-atomic).
+- **Keuntungan**: Eksekusi super cepat tanpa overhead instruksi *atomic bus locking* prosesor.
+- **Keterbatasan**: Jika dua thread berbeda mencoba menaikkan atau menurunkan `strong_count` secara bersamaan, akan terjadi **Data Race** pada counter.
+- **Proteksi Compiler**: Rust secara sadar **TIDAK mengimplementasikan marker trait `Send` dan `Sync` pada `Rc<T>`**. Jika Anda mencoba mengirim `Rc<T>` ke thread lain lewat `thread::spawn`, compiler akan langsung menolak saat waktu kompilasi (*compile-time error*). Untuk konkurensi multi-thread, Rust menyediakan padanannya yaitu `Arc<T>` (*Atomic Reference Counting*).
+
+---
+
+#### 10.7.3 Kasus Penggunaan Riil: Directed Acyclic Graph (DAG) Berbentuk Y
+
+Bayangkan dua cabang terpisah (*Branch A* dan *Branch B*) yang sama-sama berujung pada simpul ekor bersama (*Shared Node C*):
+
+```text
+Branch A [Node A] ──┐
+                    ▼
+               [Node C] (Shared Tail)
+                    ▲
+Branch B [Node B] ──┘
+```
+
+Jika menggunakan pointer tunggal `Box<TreeNode>`:
+- `Branch A` mengambil ownership `Node C`.
+- `Branch B` **tidak bisa** memegang `Node C` yang sama tanpa menduplikasi seluruh node dengan alokasi heap baru!
+
+Dengan `Rc<TreeNode>`:
+Kedua cabang cukup memanggil `Rc::clone(&shared_c)`. Keduanya memegang alamat pointer heap yang identik:
+```rust
+let shared_c = Rc::new(TreeNode::new("Node-C", None));
+let branch_a = Rc::new(TreeNode::new("Node-A", Some(Rc::clone(&shared_c))));
+let branch_b = Rc::new(TreeNode::new("Node-B", Some(Rc::clone(&shared_c))));
+
+// Alamat memori heap Node C yang dirujuk Branch A dan Branch B terbukti persis sama!
+```
+
+---
+
+#### 10.7.4 Mencegah Memory Leak Siklus Referensi: `Weak<T>` (`Rc::downgrade`)
+
+Jika dua `Rc` saling memegang referensi satu sama lain (Node A menunjuk Node B, dan Node B menunjuk Node A), maka:
+- `strong_count` keduanya tidak akan pernah menyentuh 0.
+- Memori heap keduanya tidak akan pernah dibebaskan seumur hidup program $\to$ **Memory Leak (Siklus Referensi)**!
+
+**Solusi Rust: `Weak<T>`**
+- Dibuat menggunakan `Rc::downgrade(&rc_ref)`.
+- Menaikkan `weak_count`, tetapi **TIDAK menaikkan `strong_count`**.
+- Menandakan relasi non-owning (misal: anak memegang referensi lemah `Weak<Parent>` ke orang tuanya).
+- Untuk membaca data dari `Weak<T>`, panggil `.upgrade()`, yang menghasilkan `Option<Rc<T>>`. Jika data induk sudah di-drop, method ini mengembalikan `None` secara aman tanpa undefined behavior.
+
+---
+
+#### 10.7.5 Kode Implementasi & Bukti Eksekusi: `fase10_task_2.rs`
+
+Implementasi komprehensif seluruh konsep di atas dapat dilihat di:
+[fase10_task_2.rs](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/fase10_task_2.rs)
+
+Hasil eksekusi program:
+```text
+=== FASE 10 TASK 2: SMART POINTER RC<T> ===
+
+1. Shared Ownership & strong_count Lifecycle:
+   [DROP EVENT] TrackedData 'SharedConfig' dibebaskan dari heap!
+   - strong_count awal (data_a)                  : 1
+   - strong_count setelah Rc::clone (data_b)     : 2
+   - strong_count di dalam inner scope (data_c)  : 3
+
+2. Verifikasi Trait Drop saat strong_count == 0:
+   - Instansiasi root: strong_count = 1
+   - Dibagikan ke 2 client: strong_count = 3
+   - drop(client_a): strong_count = 2
+   - drop(client_b): strong_count = 1
+   - Menghancurkan root...
+   [DROP EVENT] TrackedData 'SessionToken' dibebaskan dari heap!
+   - Status Drop setelah semua owner selesai: true
+
+3. Multi-Parent Graph (Y-Shaped DAG):
+   - Cabang A: value = Node-A
+   - Cabang B: value = Node-B
+   - Node C yang dishare memiliki strong_count = 3
+   - Alamat heap Node C via Branch A: 0x5f24bb634f80
+   - Alamat heap Node C via Branch B: 0x5f24bb634f80
+   - Terbukti: Kedua cabang merujuk ke blok memori heap YANG SAMA!
+
+4. Weak References (Rc::downgrade):
+   - strong_count = 1, weak_count = 1
+   - Weak pointer berhasil diupgrade: true
+
+[OK] Task Fase 10 (Rc) selesai & terverifikasi.
+```
+
+---
+
+### 10.8 Smart Pointer `RefCell<T>` & Interior Mutability
+
+Secara default di Rust, jika Anda memiliki variabel immutable (`let x = ...;`) atau referensi immutable (`&self`, `&T`), Anda **dilarang keras** memutasi data di dalamnya. Aturan ini ditegakkan oleh compiler pada waktu kompilasi (*compile-time borrow checking*).
+
+Namun, ada situasi di mana data perlu dimutasi meskipun dibungkus dalam referensi immutable—misalnya ketika mengimplementasikan trait pihak ketiga yang metodenya hanya menerima `&self`, atau saat membuat Mock Object untuk unit testing. Pola desain ini disebut **Interior Mutability**, dan `RefCell<T>` adalah alat utamanya.
+
+---
+
+#### 10.8.0 Mental Model & Analogi Ramah Pemula: "Buku Tamu yang Dijaga Satpam"
+
+Mari kita gunakan analogi sederhana untuk memahami perbedaan antara borrowing biasa dan `RefCell`:
+
+##### 1. Borrowing Biasa (`&T` / `&mut T`): "Pemeriksaan di Pintu Gerbang (Compile-Time)"
+- Compiler adalah satpam di pintu gerbang kampus.
+- Satpam memeriksa seluruh jadwal kunjungan Anda sebelum Anda diizinkan masuk.
+- Jika ada kemungkinan jadwal Anda bentrok (dua orang mau mencoret buku di saat yang sama), satpam langsung **melarang program dikompilasi**.
+- **Kelebihan**: Zero overhead runtime! Program yang lolos dijamin 100% aman dari data race dan dangling pointer.
+- **Kekurangan**: Terlalu kaku. Terkadang kita tahu jadwal kita aman di runtime, tetapi satpam gerbang menolaknya karena tidak bisa membuktikannya secara statis.
+
+##### 2. `RefCell<T>`: "Pemeriksaan di Meja Buku Tamu (Runtime)"
+- Satpam tidak berjaga di pintu gerbang, melainkan **berdiri tepat di samping meja buku tamu saat program berjalan (Runtime)**.
+- Ketika pengunjung datang:
+  - Mau baca saja? Pengunjung memanggil `.borrow()`. Satpam mengizinkan banyak orang membaca bersamaan.
+  - Mau mencatat/menulis? Pengunjung memanggil `.borrow_mut()`. Satpam memastikan **hanya 1 orang** yang boleh memegang pena eksklusif.
+- **Apa yang terjadi jika ada orang kedua nekat memanggil `.borrow_mut()` saat ada yang sedang menulis?**
+  Satpam langsung **membunyikan sirine alarm dan menghentikan seluruh gedung (PANIC saat runtime)!**
+
+```text
+Aturan Emas Borrow Checker Rust Tetap Berlaku Sama Persis:
+┌────────────────────────────────────────────────────────────────────────┐
+│  Boleh BANYAK Pembaca (.borrow()) ATAU SATU Penulis (.borrow_mut()),   │
+│                      TIDAK BOLEH KEDUANYA!                             │
+└────────────────────────────────────────────────────────────────────────┘
+Perbedaannya:
+- Referensi biasa: Aturan diperiksa saat COMPILE-TIME (program gagal dicompile).
+- RefCell<T>    : Aturan diperiksa saat RUNTIME (program panic jika melanggar).
+```
+
+---
+
+#### 10.8.1 Perbandingan: Referensi Biasa vs `RefCell<T>`
+
+| Karakteristik | Referensi Biasa (`&T` / `&mut T`) | `RefCell<T>` |
+| :--- | :--- | :--- |
+| **Kapan Borrow Check?** | Compile-Time (waktu kompilasi). | Runtime (saat program berjalan). |
+| **Overhead Performa** | Nol mutlak (*Zero-Cost Abstraction*). | Sangat kecil (menyimpan counter peminjam internal di memori). |
+| **Akibat Pelanggaran** | Compiler Error (`E0502`, `E0499`). | **Runtime PANIC** (`RefCell already borrowed`). |
+| **Mutasi di Balik `&T`?** | Tidak bisa (ditolak compiler). | **Bisa!** Melalui `.borrow_mut()`. |
+| **Lingkungan Thread** | Single-thread & Multi-thread (jika `Sync`). | **Hanya Single-Thread** (`!Sync`). |
+
+---
+
+#### 10.8.2 Method Kunci `borrow()` dan `borrow_mut()`
+
+1. **`.borrow() -> Ref<T>`**:
+   - Meminjam nilai secara immutable (baca saja).
+   - Menambah counter pembaca internal.
+   - Boleh dipanggil berkali-kali secara bersamaan selama tidak ada `borrow_mut()` aktif.
+2. **`.borrow_mut() -> RefMut<T>`**:
+   - Meminjam nilai secara mutable (tulis/ubah).
+   - Memastikan counter pembaca bernilai 0 dan belum ada mutable borrow lain yang aktif.
+   - Mengembalikan guard `RefMut<T>`. Saat guard ini keluar dari scope (`Drop`), status peminjaman otomatis dilepaskan.
+3. **Alternatif Aman Tanpa Panic**:
+   - `.try_borrow() -> Result<Ref<T>, BorrowError>`
+   - `.try_borrow_mut() -> Result<RefMut<T>, BorrowMutError>`
+   - Mengembalikan `Err` daripada memicu panic jika aturan peminjaman sedang dilanggar.
+
+---
+
+#### 10.8.3 Duet Maut di Rust: `Rc<RefCell<T>>` (Shared Mutable State)
+
+Mengapa Rustacean sering menggabungkan `Rc` dan `RefCell` menjadi `Rc<RefCell<T>>`?
+
+- **`Rc<T>`**: Memungkinkan **banyak pemilik**, tetapi hanya mengizinkan akses baca immutable (`&T`). Anda tidak bisa mengubah data di dalamnya.
+- **`RefCell<T>`**: Mengizinkan **mutasi data di balik referensi immutable**, tetapi hanya memiliki **1 pemilik tunggal**.
+- **`Rc<RefCell<T>>`**: Menggabungkan kekuatan keduanya $\to$ **Banyak pemilik yang sama-sama bisa memutasi satu data bersama di Heap!**
+
+```text
+          ┌──────────────────────────────────────────────┐
+          │                  MEMORI HEAP                 │
+          │                                              │
+          │  Rc:      [ strong_count = 2 ]               │
+          │  RefCell: [ borrow_count = 0 ]               │
+          │  Payload: Vec<String> ["Log 1", "Log 2"]     │
+          └──────────────────────────────────────────────┘
+                     ▲                          ▲
+                     │                          │
+        node_a.shared_data.borrow_mut()   node_b.shared_data.borrow_mut()
+            (Service A menulis log)           (Service B menulis log)
+```
+
+Contoh di kode nyata:
+```rust
+let shared_log = Rc::new(RefCell::new(Vec::new()));
+
+let service_a = SharedNode::new("Service-A", Rc::clone(&shared_log));
+let service_b = SharedNode::new("Service-B", Rc::clone(&shared_log));
+
+// Kedua service dapat menulis ke Vec yang sama persis:
+service_a.append("Koneksi dibuka");
+service_b.append("Data diproses");
+
+println!("Total log: {}", shared_log.borrow().len()); // Output: 2
+```
+
+---
+
+#### 10.8.4 Kode Implementasi & Bukti Eksekusi: `fase10_task_3.rs`
+
+Implementasi komprehensif seluruh konsep di atas dapat dilihat di:
+[fase10_task_3.rs](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/fase10_task_3.rs)
+
+Hasil eksekusi program:
+```text
+=== FASE 10 TASK 3: SMART POINTER REFCELL<T> ===
+
+1. Demonstrasi borrow() dan borrow_mut():
+   - Nilai awal cell          : 10
+   - Nilai setelah borrow_mut : 35
+   - MockCounter dipanggil via &counter (&self): count = 2
+
+2. Eksperimen Sengaja Double Mutable Borrow:
+   - Terbukti: Panic tertangkap di Runtime!
+   - Pesan Panic: "already borrowed: BorrowMutError"
+   - Detail error raw: RefCell already borrowed
+
+3. Pemeriksaan Tanpa Panic (try_borrow & try_borrow_mut):
+   - try_borrow() saat borrow_mut aktif    : false (Aman! Mengembalikan Err)
+   - try_borrow_mut() saat borrow_mut aktif: false (Aman! Mengembalikan Err)
+
+4. Pola Kolaborasi Rc<RefCell<T>>:
+   - Isi log bersama (diakses & dimutasi oleh Node A dan Node B):
+     1. [Service-A] Inisialisasi koneksi
+     2. [Service-B] Menerima request #101
+     3. [Service-A] Menulis transaksi database
+     4. [Service-B] Mengirim HTTP Response 200
+
+5. Mock Messenger Pattern (Interior Mutability):
+   - Total pesan terkirim yang dicatat: 2
+
+[OK] Task Fase 10 (RefCell) selesai & terverifikasi.
+```
+
+---
+
+### 10.9 Smart Pointer `Arc<T>` (Atomic Reference Counting & Multi-Threading)
+
+Pada sub-bab sebelumnya (10.7), kita telah mempelajari `Rc<T>` untuk berbagi kepemilikan (*shared ownership*) di lingkungan single-thread. Namun, ketika kita mencoba memindahkan `Rc<T>` ke thread lain melalui `thread::spawn`, compiler Rust langsung menolaknya:
+`the trait Send is not implemented for Rc<T>`.
+
+Untuk kebutuhan multi-threading, Rust menyediakan **`Arc<T>`** (*Atomic Reference Counting*).
+
+---
+
+#### 10.9.0 Mental Model & Analogi Ramah Pemula: "Papan Skor Digital Terkunci (Atomik)"
+
+##### 1. Masalah `Rc` di Multi-Thread: "Papan Catatan Manual yang Rawan Rebutan"
+- Ingat analogi papan catatan `strong_count` di `Rc`?
+- Pada `Rc`, angka dinaikkan dengan operasi CPU biasa:
+  1. Baca angka saat ini (misal: 2).
+  2. Tambahkan 1 (2 + 1 = 3).
+  3. Simpan kembali angka 3.
+- Jika ada **Thread 1** dan **Thread 2** yang sama-sama melakukan `Rc::clone` di mikrodetik yang persis sama:
+  - Thread 1 baca: 2
+  - Thread 2 baca: 2 (sebelum Thread 1 sempat menulis 3!)
+  - Keduanya menulis 3 $\to$ **Harusnya 4, tapi cuma tercatat 3!**
+  - Akibatnya: Memori bisa di-drop padahal masih ada thread yang memakainya (**Data Race / Use-After-Free**).
+
+##### 2. Solusi `Arc`: "Papan Skor Digital dengan Kunci Otomatis (Atomic)"
+- Huruf **'A'** pada `Arc` adalah singkatan dari **Atomic**.
+- Di level hardware CPU, operasi penambahan/pengurangan ref-count dilakukan menggunakan instruksi atomik khusus (`fetch_add`, `fetch_sub`).
+- Instruksi ini mengunci bus memori di prosesor sehingga **tidak mungkin ada dua core CPU yang berebut mencatat di saat bersamaan**.
+- Jika Thread 1 sedang menambah counter, Thread 2 dipaksa menunggu sekejap sampai operasi Thread 1 selesai 100%.
+
+##### 3. Kapan Memilih `Rc<T>` vs `Arc<T>`?
+
+| Smart Pointer | Keamanan Multi-Thread | Biaya Performa CPU | Kapan Digunakan? |
+| :--- | :--- | :--- | :--- |
+| **`Rc<T>`** | ❌ Tidak aman (`!Send`, `!Sync`) | Super Cepat (operasi integer biasa) | Single-threaded apps, logika UI lokal, state internal komponen. |
+| **`Arc<T>`** | ✅ Aman lintas thread OS (`Send + Sync`) | Sedikit overhead (instruksi atomik hardware) | Multi-threading, web server concurrent, worker pool, data sharing antar-thread. |
+
+> [!TIP]
+> **Kenapa Rust tidak membuat semua pointer menjadi `Arc` saja?**
+> Filosofi Rust adalah **Zero-Cost Abstraction**. Jika aplikasi Anda hanya berjalan di 1 thread, Anda tidak perlu membayar biaya penalti performa dari operasi atomik hardware CPU.
+
+---
+
+#### 10.9.1 Mekanisme Berbagi Nilai Antar-Thread via `Arc::clone`
+
+Ketika Anda membuat `let shared = Arc::new(data);` lalu memanggil `Arc::clone(&shared)` untuk diberikan ke thread pekerja:
+1. Data asli di Heap **TIDAK PERNAH DI-COPY**.
+2. Yang disalin ke tiap thread hanyalah pointer stack (8 bytes) + atomic counter dinaikkan $+1$.
+3. Tiap thread membaca blok memori Heap yang **sama persis** (terbukti alamat pointernya identik).
+
+```text
+┌───────────────────────────┐
+│        MAIN THREAD        │
+│  Variabel `config`        │
+│  ┌─────────────────────┐  │
+│  │ Pointer: 0x5ec887e9 ├──┼───────────────┐
+│  └─────────────────────┘  │               │
+└───────────────────────────┘               │
+                                            │         ┌──────────────────────────────────────┐
+┌───────────────────────────┐               │         │             HEAP MEMORY              │
+│       WORKER THREAD 1     │               │         │                                      │
+│  Variabel `config_clone`  │               ├────────>│  ┌────────────────┬───────────────┐  │
+│  ┌─────────────────────┐  │ (Semua thread │         │  │ Atomic Counter:│ 3             │  │
+│  │ Pointer: 0x5ec887e9 ├──┼── menunjuk ke ┼────────>│  ├────────────────┴───────────────┤  │
+│  └─────────────────────┘  │  alamat sama) │         │  │ Payload: AppConfig ("Server")   │  │
+└───────────────────────────┘               │         │  └─────────────────────────────────┘  │
+                                            │         └──────────────────────────────────────┘
+┌───────────────────────────┐               │
+│       WORKER THREAD 2     │               │
+│  Variabel `config_clone`  │               │
+│  ┌─────────────────────┐  │               │
+│  │ Pointer: 0x5ec887e9 ├──┼───────────────┘
+│  └─────────────────────┘  │
+└───────────────────────────┘
+```
+
+---
+
+#### 10.9.2 Pola Komputasi Paralel (Parallel Read / Map-Reduce)
+
+`Arc<T>` sangat ideal untuk membagi dataset read-only berukuran besar ke beberapa thread pekerja tanpa overhead memori sama sekali:
+```rust
+let dataset = Arc::new(vec![1, 2, 3, ..., 1_000_000]);
+
+// Tiap thread membaca irisan data secara simultan dan paralel
+let worker_1 = {
+    let d = Arc::clone(&dataset);
+    thread::spawn(move || d[0..250_000].iter().sum::<i64>())
+};
+```
+Semua thread membaca secara aman dan paralel karena referensi `&T` di balik `Arc` bersifat immutable dan thread-safe (`Sync`).
+
+---
+
+#### 10.9.3 Kode Implementasi & Bukti Eksekusi: `fase10_task_4.rs`
+
+Implementasi komprehensif seluruh konsep di atas dapat dilihat di:
+[fase10_task_4.rs](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/fase10_task_4.rs)
+
+Hasil eksekusi program:
+```text
+=== FASE 10 TASK 4: SMART POINTER ARC<T> ===
+
+1. Berbagi Nilai Immutable ke Multi-Thread (Arc::clone):
+   - Worker #1 terhubung ke 'RustLearningServer' [Endpoint: /api/v1/tasks]
+   - Worker #2 terhubung ke 'RustLearningServer' [Endpoint: /api/v1/health]
+   - Worker #3 terhubung ke 'RustLearningServer' [Endpoint: /api/v1/auth]
+
+2. Siklus Hidup Arc strong_count:
+   - strong_count awal (main thread)          : 1
+   - strong_count setelah clone untuk thread  : 2
+   - strong_count setelah worker thread join  : 1
+
+3. Pemrosesan Paralel Tanpa Copy Heap Memori:
+   - Alamat Heap dataset: Pointer { addr: 0x5ec887e9e8f0, metadata: 1000 }
+   - Total komputasi 4 worker thread: 500500
+   - Nilai ekspektasi (1..=1000)     : 500500
+   - Verifikasi integritas: COCOK 100%!
+
+[OK] Task Fase 10 (Arc) selesai & terverifikasi.
+```
+
+---
+
+### 10.10 Smart Pointer `Mutex<T>` & `RwLock<T>` (Multi-Thread Shared Mutable State)
+
+Pada sub-bab 10.9, kita menggunakan `Arc<T>` untuk membagikan data **hanya baca (*read-only*)** ke banyak thread. Namun, bagaimana jika banyak thread perlu **mengubah (*mutate*)** data bersama tersebut secara serentak?
+
+Rust melarang mutasi bersama tanpa sinkronisasi untuk mencegah **Data Race**. Untuk melakukan mutasi bersama lintas thread, Rust menyediakan dua mekanisme penguncian (*locking primitives*):
+1. **`Mutex<T>`** (*Mutual Exclusion*)
+2. **`RwLock<T>`** (*Reader-Writer Lock*)
+
+Keduanya hampir selalu dibungkus dalam `Arc`: **`Arc<Mutex<T>>`** atau **`Arc<RwLock<T>>`**.
+
+---
+
+#### 10.10.0 Mental Model & Analogi Ramah Pemula
+
+##### 1. `Mutex<T>`: "Kamar Mandi Umum dengan Kunci Pintu Otomatis"
+- Bayangkan sebuah kamar mandi umum di stasiun.
+- Hanya **1 orang** yang boleh masuk ke dalam kamar mandi dalam satu waktu (tidak peduli orang itu mau mandi atau sekadar mencuci tangan).
+- Jika pintu sedang terkunci dari dalam, orang berikutnya yang memanggil `.lock()` harus **berdiri mengantre** sampai orang di dalam keluar.
+- **Kunci Otomatis (RAII Guard)**:
+  Begitu orang di dalam melangkah keluar pintu (variabel guard keluar dari scope `{ }`), pintu **otomatis terbuka sendiri** tanpa perlu tombol manual. Tidak ada risiko lupa membuka kunci!
+
+##### 2. `RwLock<T>`: "Papan Pengumuman Kantor (Reader-Writer Lock)"
+- Bayangkan sebuah papan pengumuman besar di dinding kantor:
+  - **Membaca (`read()` lock)**: 100 karyawan boleh berdiri bersamaan membaca isi pengumuman tanpa saling menghalangi (*concurrent readers*).
+  - **Menulis/Mengubah (`write()` lock)**: Jika manajer ingin mengganti kertas pengumuman, manajer harus menunggu sampai seluruh pembaca selesai. Begitu manajer menulis, tirai ditutup rapat: **tidak ada orang lain yang boleh membaca ataupun menulis** sampai manajer selesai.
+
+##### 3. Contoh Kode Lengkap: `Arc<Mutex<T>>`
+```rust
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+fn contoh_mutex_multithread() {
+    // 1. Bungkus data dalam Mutex, lalu bungkus dalam Arc untuk multi-owner
+    let counter = Arc::new(Mutex::new(0));
+    let mut handles = vec![];
+
+    // 2. Spawn 5 worker thread yang sama-sama menambah counter
+    for i in 1..=5 {
+        let counter_clone = Arc::clone(&counter);
+        let handle = thread::spawn(move || {
+            // Mengambil kunci kamar mandi: thread menunggu giliran jika sedang ada yang masuk
+            let mut num = counter_clone.lock().unwrap();
+            *num += 1;
+            println!("Worker #{} selesai menambah nilai. Nilai saat ini = {}", i, *num);
+            // Kunci otomatis dilepas di sini saat variabel `num` keluar scope!
+        });
+        handles.push(handle);
+    }
+
+    // 3. Tunggu semua thread selesai
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // 4. Baca nilai akhir
+    println!("Hasil Akhir Counter: {}", *counter.lock().unwrap()); // Pasti 5 (Determinik!)
+}
+```
+
+##### 4. Contoh Kode Lengkap: `Arc<RwLock<T>>`
+```rust
+use std::sync::{Arc, RwLock};
+use std::thread;
+
+fn contoh_rwlock_multithread() {
+    let cache = Arc::new(RwLock::new(vec![String::from("Config A"), String::from("Config B")]));
+
+    // A. Spawn 3 Thread Pembaca (Bisa membaca BERSAMAAN tanpa saling tunggu!)
+    let mut reader_handles = vec![];
+    for i in 1..=3 {
+        let cache_reader = Arc::clone(&cache);
+        let handle = thread::spawn(move || {
+            let r = cache_reader.read().unwrap(); // Read Lock
+            println!("Reader #{} melihat isi: {:?}", i, *r);
+        });
+        reader_handles.push(handle);
+    }
+
+    // B. Spawn 1 Thread Penulis (Membutuhkan akses EKSKLUSIF)
+    let cache_writer = Arc::clone(&cache);
+    let writer_handle = thread::spawn(move || {
+        let mut w = cache_writer.write().unwrap(); // Write Lock
+        w.push(String::from("Config C Baru"));
+        println!("Writer berhasil menambahkan konfigurasi baru!");
+    });
+
+    for h in reader_handles {
+        h.join().unwrap();
+    }
+    writer_handle.join().unwrap();
+}
+```
+
+##### 5. Kapan Memilih `Mutex<T>` vs `RwLock<T>`?
+
+| Kondisi Aplikasi | Pilihan Terbaik | Alasan |
+| :--- | :--- | :--- |
+| **Operasi Tulis Sering Terjadi** (Write-Heavy) | **`Mutex<T>`** | Overhead penguncian `Mutex` jauh lebih ringan dan cepat daripada `RwLock`. |
+| **Sangat Sering Dibaca, Jarang Diubah** (Read-Heavy, misal: 95% baca, 5% tulis) | **`RwLock<T>`** | Pembaca tidak saling memblokir satu sama lain, melipatgandakan throughput konkurensi. |
+| **Data Berukuran Kecil & Sederhana** (misal: Integer counter / Flag boolean) | **Atomic (`AtomicUsize`, `AtomicBool`)** | Jauh lebih cepat tanpa syscall locking OS sama sekali. |
+
+---
+
+#### 10.10.1 Anatomi `MutexGuard` & Pola Kritis: "Scope Lock"
+
+Ketika Anda memanggil `let mut guard = mutex.lock().unwrap();`:
+1. Thread akan diblokir (*sleep/wait*) jika mutex sedang dipegang thread lain.
+2. Saat giliran tiba, pemanggilan mengembalikan **`MutexGuard<T>`**.
+3. `MutexGuard<T>` mengimplementasikan `Deref` dan `DerefMut`, sehingga Anda dapat mengakses dan memutasi data `T` seolah-olah referensi biasa (`*guard` / `guard.method()`).
+4. **Pola Scope Lock**: Batasi masa hidup guard menggunakan kurung kurawal `{ }` agar thread lain tidak kelaparan (*lock contention*):
+
+```rust
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
+let shared_data = Arc::new(Mutex::new(0));
+
+// CONTOH YANG BAIK (Scope Lock Singkat):
+{
+    let mut guard = shared_data.lock().unwrap();
+    *guard += 10;
+} // <- `guard` DI-DROP DI SINI! Pintu langsung terbuka seketika untuk thread lain.
+
+// Pekerjaan komputasi berat / I/O dilakukan DI LUAR scope lock:
+thread::sleep(Duration::from_millis(50)); // Thread lain TIDAK terhalang!
+```
+
+---
+
+#### 10.10.2 Analisis Non-Blocking: `try_lock()`, `try_read()`, dan `try_write()`
+
+Selain metode pemblokir (`lock()` dan `read()`), Rust menyediakan metode non-blocking agar thread tidak tertahan macet (*freeze*):
+
+- `mutex.try_lock()`: Jika sedang terkunci, langsung mengembalikan `Err(TryLockError::WouldBlock)` tanpa membuat thread menunggu.
+- `rwlock.try_read()` / `rwlock.try_write()`: Memeriksa ketersediaan akses baca/tulis secara instan.
+
+```rust
+use std::sync::{Mutex, RwLock};
+
+fn contoh_non_blocking_check() {
+    // 1. Mutex try_lock
+    let m = Mutex::new(100);
+    let guard1 = m.lock().unwrap();
+
+    // Coba minta lock saat guard1 masih aktif di tangan kita:
+    match m.try_lock() {
+        Ok(_) => println!("Lock berhasil didapat"),
+        Err(_) => println!("Lock sedang sibuk! Thread tidak diblokir, bisa lakukan task lain."),
+    }
+    drop(guard1); // Buka kunci manual
+
+    // 2. RwLock try_read & try_write
+    let rw = RwLock::new(String::from("Data"));
+    let write_guard = rw.write().unwrap();
+
+    // Selagi write_guard aktif, pembaca dan penulis lain pasti ditolak:
+    assert!(rw.try_read().is_err());
+    assert!(rw.try_write().is_err());
+    drop(write_guard); // Buka kunci eksklusif
+
+    // Sekarang bebas dibaca
+    assert!(rw.try_read().is_ok());
 }
 ```
 
 ---
 
+#### 10.10.3 Kode Implementasi & Bukti Eksekusi: `fase10_task_5.rs`
+
+Implementasi komprehensif seluruh konsep di atas dapat dilihat di:
+[fase10_task_5.rs](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/fase10_task_5.rs)
+
+Hasil eksekusi program:
+```text
+=== FASE 10 TASK 5: MUTEX<T> & RWLOCK<T> ===
+
+1. Mutex<T> Shared Mutable State & Scope Lock:
+   - Saldo awal: Rp1000.0, 5 worker masing-masing setor Rp200.0
+   - Saldo akhir (determinik berkat Mutex): Rp2000.00
+
+2. Non-blocking try_lock():
+   - Apakah try_lock() mendeteksi lock sedang sibuk? true (Aman tanpa deadlock!)
+
+3. RwLock<T> Konkurensi Banyak Pembaca (Read Lock):
+   - Hasil baca simultan dari 4 thread: [1, 1, 1, 1]
+   - Terbukti: 4 thread pembaca membaca secara paralel tanpa saling blokir!
+
+4. RwLock<T> Eksklusivitas Penulis (Write Lock):
+   - Versi cache setelah write lock: v2
+   - Apakah pembaca diizinkan masuk selagi write lock aktif? false
+   - Terbukti: Write lock mengisolasi data 100% dari semua pembaca & penulis lain!
+
+[OK] Task Fase 10 (Mutex / RwLock) selesai & terverifikasi.
+```
+
+---
+
+### 10.11 Mini Project Fase 10: Multi-Threaded Shared Counter & Evaluasi Kelulusan Fase 10
+
+Mini Project Fase 10 menggabungkan smart pointer `Arc<T>` (Atomic Reference Counting) dan `Mutex<T>` (Mutual Exclusion) untuk membangun sistem penghitung bersama (*shared counter*) yang dimutasi secara konkuren oleh 10 worker thread secara simultan dan menghasilkan nilai akhir yang **100% deterministik tanpa data race**.
+
+---
+
+#### 10.11.1 Arsitektur `Arc<Mutex<i32>>` & Pola Eksekusi Konkuren
+
+Dalam arsitektur konkuren Rust, pola `Arc<Mutex<T>>` adalah standar industri untuk *shared mutable state* lintas thread:
+
+```text
+               ┌────────────────────────────────────────────────────────┐
+               │                      HEAP MEMORY                       │
+               │                                                        │
+               │   Arc:   [ Atomic Strong Count = 10 ]                  │
+               │   Mutex: [ Lock Status: UNLOCKED / LOCKED ]            │
+               │   Data:  i32 Counter = 1000                            │
+               └────────────────────────────────────────────────────────┘
+                       ▲               ▲                ▲
+                       │               │                │
+                Arc::clone(&cnt) Arc::clone(&cnt) Arc::clone(&cnt)
+                       │               │                │
+                 Worker Thread 1  Worker Thread 2  Worker Thread 10
+                 (Scope Lock 1)   (Scope Lock 2)   (Scope Lock 10)
+```
+
+1. **`Arc<T>`**: Menyediakan kepemilikan bersama yang aman lintas thread OS (*thread-safe multi-ownership*). Setiap thread memegang klon pointer 8 byte ke alokasi heap yang sama.
+2. **`Mutex<T>`**: Memastikan hanya ada **tepat satu thread** yang dapat mengakses dan memutasi nilai counter pada satu waktu (*mutual exclusion*). Thread lain yang memanggil `.lock()` secara otomatis ditidurkan (*sleep*) oleh OS hingga kunci dilepas.
+3. **Pola Scope Lock Singkat**: Kunci Mutex segera dilepas begitu operasi mutasi integer selesai, mencegah perebutan kunci yang berlebihan (*lock contention*).
+4. **Sinkronisasi Thread via `join()`**: Main thread menunggu seluruh 10 worker thread menyelesaikan tugasnya menggunakan `handle.join()`, menjamin nilai akhir dapat dibaca secara deterministik.
+
+---
+
+#### 10.11.2 Evaluasi Tiga Kriteria Lulus Fase 10
+
+Tiga konsep fundamental penguasaan memori dan konkurensi diuji dan divalidasi:
+
+1. **Perbedaan `Rc<T>` vs `Arc<T>`**:
+   - **`Rc<T>` (*Reference Counting*)**:
+     - Menggunakan penghitung non-atomic (operasi integer CPU biasa).
+     - Super cepat dengan nol overhead atomik.
+     - **Hanya untuk single-thread**: Compiler Rust secara sadar tidak mengimplementasikan `Send` dan `Sync` pada `Rc<T>`.
+   - **`Arc<T>` (*Atomic Reference Counting*)**:
+     - Menggunakan instruksi CPU atomik hardware (`fetch_add` / `fetch_sub`).
+     - **Aman untuk multi-thread (`Send + Sync`)**: Dapat dipindahkan dan diakses lintas thread OS secara bebas.
+     - Memiliki sedikit overhead latensi CPU karena penyelarasan memori atomik (*memory ordering*).
+
+2. **Perbedaan `RefCell<T>` vs `Mutex<T>`**:
+   - **`RefCell<T>` (*Single-Thread Interior Mutability*)**:
+     - Aturan peminjaman (borrow checker) diperiksa saat **runtime**.
+     - Hanya boleh digunakan dalam 1 thread tunggal.
+     - Jika aturan dilanggar (misal 2 mutable borrow bersamaan), seketika terjadi **PANIC**.
+   - **`Mutex<T>` (*Multi-Thread Synchronization*)**:
+     - Memproteksi mutabilitas bersama lintas banyak thread OS.
+     - Jika terjadi perebutan akses, thread yang menunggu **TIDAK PANIC**, melainkan **DIBLOKIR / ANTRE (*sleep*)** hingga kunci dilepaskan melalui RAII guard.
+
+3. **Panduan Memilih `Mutex<T>` vs `RwLock<T>`**:
+   - **Pilih `Mutex<T>`**:
+     - Saat beban kerja dominan operasi **TULIS / UBAH (*write-heavy*)**.
+     - Saat ukuran data kecil atau durasi penguncian sangat singkat.
+     - Overhead locking `Mutex` jauh lebih ringan dan sederhana dibandingkan `RwLock`.
+   - **Pilih `RwLock<T>`**:
+     - Saat beban kerja dominan operasi **BACA (*read-heavy*)**, misalnya 90% pembaca dan 10% penulis (contoh: cache konfigurasi sistem).
+     - Banyak thread pembaca dapat mengakses data secara paralel (*concurrent read*) tanpa saling memblokir satu sama lain.
+
+---
+
+#### 10.11.3 Kode Implementasi Lengkap `mini_project_10.rs`
+
+Berikut adalah kode sumber lengkap yang telah diuji dan diintegrasikan pada `rust-learning-lab/src/mini_project_10.rs`:
+
+```rust
+// Mini Project Fase 10: Multi-Threaded Shared Counter (Smart Pointers & Concurrency)
+// Rujukan: rust_learning_guide.md (Sub-bab 10.11) & rust_execution_tasks.md (L903-L917)
+
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+
+/// Abstraksi Counter Bersama Terproteksi Mutex lintas Thread.
+#[derive(Debug, Clone)]
+pub struct SharedCounter {
+    counter: Arc<Mutex<i32>>,
+}
+
+impl SharedCounter {
+    pub fn new(initial: i32) -> Self {
+        Self {
+            counter: Arc::new(Mutex::new(initial)),
+        }
+    }
+
+    pub fn get_value(&self) -> i32 {
+        *self.counter.lock().expect("Gagal mengunci Mutex saat membaca nilai")
+    }
+
+    pub fn increment_by(&self, amount: i32) {
+        let mut guard = self.counter.lock().expect("Gagal mengunci Mutex saat increment");
+        *guard += amount;
+    }
+
+    pub fn get_arc(&self) -> Arc<Mutex<i32>> {
+        Arc::clone(&self.counter)
+    }
+
+    pub fn execute_workers(
+        &self,
+        num_workers: usize,
+        increments_per_worker: usize,
+        step: i32,
+    ) -> Vec<JoinHandle<usize>> {
+        let mut handles = Vec::with_capacity(num_workers);
+
+        for worker_id in 0..num_workers {
+            let counter_clone = Arc::clone(&self.counter);
+
+            let handle = thread::spawn(move || {
+                for _ in 0..increments_per_worker {
+                    let mut guard = counter_clone.lock().expect("Mutex poison error");
+                    *guard += step;
+                }
+                worker_id
+            });
+
+            handles.push(handle);
+        }
+
+        handles
+    }
+}
+
+pub fn explain_rc_vs_arc() -> (&'static str, &'static str) {
+    let rc_desc = "Rc<T> (Single-Thread): Menggunakan penghitung non-atomic (integer biasa). \
+                   Sangat cepat tanpa overhead atomik hardware, tetapi TIDAK aman untuk multi-thread (!Send, !Sync).";
+    let arc_desc = "Arc<T> (Multi-Thread): Menggunakan Atomic Reference Counting via instruksi CPU atomik \
+                    (fetch_add/fetch_sub). Aman dibagikan lintas thread OS (Send + Sync) dengan sedikit overhead CPU.";
+    (rc_desc, arc_desc)
+}
+
+pub fn explain_refcell_vs_mutex() -> (&'static str, &'static str) {
+    let refcell_desc = "RefCell<T> (Single-Thread Interior Mutability): Borrow check diperiksa saat RUNTIME. \
+                        Hanya untuk 1 thread. Jika aturan dilanggar, seketika terjadi PANIC.";
+    let mutex_desc = "Mutex<T> (Multi-Thread Synchronization): Memproteksi mutabilitas bersama lintas thread. \
+                      Thread yang berebut tidak panic, melainkan DIBLOKIR / ANTRE (sleep) hingga lock dilepas via RAII guard.";
+    (refcell_desc, mutex_desc)
+}
+
+pub fn explain_mutex_vs_rwlock() -> (&'static str, &'static str) {
+    let mutex_choice = "Pilih Mutex<T>: Saat beban kerja dominan TULIS (write-heavy) atau mutasi berlangsung sering. \
+                        Overhead locking Mutex jauh lebih ringan dan sederhana dibandingkan RwLock.";
+    let rwlock_choice = "Pilih RwLock<T>: Saat beban kerja dominan BACA (read-heavy, misal 90% baca, 10% tulis). \
+                         Banyak thread pembaca (read lock) dapat mengakses data bersamaan secara simultan tanpa saling tunggu.";
+    (mutex_choice, rwlock_choice)
+}
+
+pub fn run() {
+    println!("=== Mini Project Fase 10: Multi-Threaded Shared Counter ===");
+
+    let initial_value = 0;
+    let shared_counter = SharedCounter::new(initial_value);
+    println!("1. Inisialisasi: Arc<Mutex<i32>> dengan nilai awal = {initial_value}");
+
+    let num_workers = 10;
+    let increments_per_worker = 100;
+    let step = 1;
+    let expected_final = initial_value + (num_workers as i32 * increments_per_worker as i32 * step);
+
+    println!("2. Memulai {num_workers} Worker Threads...");
+    println!("   - Tiap worker melakukan {increments_per_worker}x increment (+{step})");
+    println!("   - Target nilai akhir deterministik: {expected_final}");
+
+    let handles = shared_counter.execute_workers(num_workers, increments_per_worker, step);
+
+    for handle in handles {
+        let _ = handle.join().expect("Worker thread panic");
+    }
+    println!("3. Seluruh {num_workers} thread sukses di-join (selesai).");
+
+    let final_value = shared_counter.get_value();
+    println!("4. Hasil Akhir Counter Terbaca: {final_value}");
+    if final_value == expected_final {
+        println!("   [✓] Sukses: Hasil akhir 100% DETERMINISTIK tanpa data race!");
+    } else {
+        println!("   [✗] Gagal: Data race terdeteksi!");
+    }
+
+    let direct_arc = shared_counter.get_arc();
+    let arc_val = *direct_arc.lock().unwrap();
+    shared_counter.increment_by(5);
+    println!("   - get_arc() membaca: {arc_val}, setelah increment_by(+5): {}", shared_counter.get_value());
+
+    println!("\n--- Evaluasi & Bukti Kriteria Lulus Fase 10 ---");
+    let (rc_info, arc_info) = explain_rc_vs_arc();
+    println!("A. Perbedaan Rc vs Arc:");
+    println!("   - {rc_info}");
+    println!("   - {arc_info}");
+
+    let (refcell_info, mutex_info) = explain_refcell_vs_mutex();
+    println!("\nB. Perbedaan RefCell vs Mutex:");
+    println!("   - {refcell_info}");
+    println!("   - {mutex_info}");
+
+    let (mutex_ch, rwlock_ch) = explain_mutex_vs_rwlock();
+    println!("\nC. Panduan Memilih Mutex vs RwLock:");
+    println!("   - {mutex_ch}");
+    println!("   - {rwlock_ch}");
+
+    println!("\n[OK] Mini Project Fase 10 selesai & terverifikasi.");
+}
+```
+
+---
+
+#### 10.11.4 Hasil Eksekusi Output Terminal Mini Project 10
+
+```text
+=== Mini Project Fase 10: Multi-Threaded Shared Counter ===
+1. Inisialisasi: Arc<Mutex<i32>> dengan nilai awal = 0
+2. Memulai 10 Worker Threads...
+   - Tiap worker melakukan 100x increment (+1)
+   - Target nilai akhir deterministik: 1000
+3. Seluruh 10 thread sukses di-join (selesai).
+4. Hasil Akhir Counter Terbaca: 1000
+   [✓] Sukses: Hasil akhir 100% DETERMINISTIK tanpa data race!
+   - get_arc() membaca: 1000, setelah increment_by(+5): 1005
+
+--- Evaluasi & Bukti Kriteria Lulus Fase 10 ---
+A. Perbedaan Rc vs Arc:
+   - Rc<T> (Single-Thread): Menggunakan penghitung non-atomic (integer biasa). Sangat cepat tanpa overhead atomik hardware, tetapi TIDAK aman untuk multi-thread (!Send, !Sync).
+   - Arc<T> (Multi-Thread): Menggunakan Atomic Reference Counting via instruksi CPU atomik (fetch_add/fetch_sub). Aman dibagikan lintas thread OS (Send + Sync) dengan sedikit overhead CPU.
+
+B. Perbedaan RefCell vs Mutex:
+   - RefCell<T> (Single-Thread Interior Mutability): Borrow check diperiksa saat RUNTIME. Hanya untuk 1 thread. Jika aturan dilanggar, seketika terjadi PANIC.
+   - Mutex<T> (Multi-Thread Synchronization): Memproteksi mutabilitas bersama lintas thread. Thread yang berebut tidak panic, melainkan DIBLOKIR / ANTRE (sleep) hingga lock dilepas via RAII guard.
+
+C. Panduan Memilih Mutex vs RwLock:
+   - Pilih Mutex<T>: Saat beban kerja dominan TULIS (write-heavy) atau mutasi berlangsung sering. Overhead locking Mutex jauh lebih ringan dan sederhana dibandingkan RwLock.
+   - Pilih RwLock<T>: Saat beban kerja dominan BACA (read-heavy, misal 90% baca, 10% tulis). Banyak thread pembaca (read lock) dapat mengakses data bersamaan secara simultan tanpa saling tunggu.
+
+[OK] Mini Project Fase 10 selesai & terverifikasi.
+```
+
+---
+
+
 ## FASE 11: Concurrency (Multi-Threading & Shared State)
 
-### 11.1 Marker Traits: `Send` & `Sync`
-- **`Send`**: Menandakan bahwa kepemilikan tipe data aman dipindahkan (*transferred*) ke thread lain.
-- **`Sync`**: Menandakan bahwa tipe data aman diakses melalui referensi bersama (`&T`) dari beberapa thread secara bersamaan (`T` adalah `Sync` jika dan hanya jika `&T` adalah `Send`).
+### 11.1 Native OS Threads, `thread::spawn`, & `JoinHandle`
+
+Rust mengadopsi model **1:1 OS Threading** (satu thread Rust dipetakan langsung ke satu thread kernel sistem operasi). Ini berbeda dengan model M:N (green threads/goroutines) yang membutuhkan runtime berat di latar belakang.
+
+#### Konsep Kunci:
+1. **`thread::spawn(|| { ... })`**:
+   - Meminta sistem operasi membuat native thread baru untuk mengeksekusi closure yang diberikan.
+   - Mengembalikan struct `JoinHandle<T>`, di mana `T` adalah tipe return value dari closure tersebut.
+2. **`JoinHandle<T>` & `.join()`**:
+   - Jika fungsi `main()` selesai, seluruh thread turunan yang masih berjalan akan langsung dimatikan paksa (*premature exit*).
+   - Memanggil `handle.join()` akan **memblokir (*block*)** thread pemanggil sampai thread target selesai bekerja.
+   - Mengembalikan tipe `Result<T, Box<dyn Any + Send + 'static>>`. Jika worker thread mengalami `panic!`, varian `Err` akan dikembalikan alih-alih merusak (*crash*) thread utama.
+3. **Keyword `move` pada Closure Thread**:
+   - Karena compiler Rust tidak dapat memprediksi berapa lama sebuah OS thread akan berjalan, referensi lokal (`&data`) dilarang dipinjam oleh thread lain (bisa menyebabkan *dangling reference* atau *use-after-free*).
+   - Keyword `move` memaksa closure untuk mengambil alih kepemilikan (*ownership*) dari semua variabel lingkungan yang digunakan.
+4. **Mengembalikan Nilai (*Return Values*) dari Thread**:
+   - Thread di Rust dapat mengembalikan nilai secara langsung seperti fungsi biasa. Nilai ini diekstraksi saat memanggil `.join().unwrap()`.
+5. **`thread::Builder`**:
+   - Digunakan untuk kustomisasi thread, seperti memberikan nama thread (sangat berguna untuk log profiling/debugging) dan ukuran stack spesifik.
+
+#### Contoh Implementasi (Selaras dengan `fase11_task_1.rs`):
+```rust
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+// 1. Spawning 2 Threads & Sinkronisasi
+pub fn spawn_two_threads_demo() -> (String, String) {
+    let handle_alpha = thread::spawn(|| {
+        thread::sleep(Duration::from_millis(20));
+        String::from("Hasil dari Alpha: OK")
+    });
+
+    let handle_beta = thread::spawn(|| {
+        thread::sleep(Duration::from_millis(15));
+        String::from("Hasil dari Beta: OK")
+    });
+
+    // Menunggu kedua thread selesai dan mengekstrak return value
+    let res_a = handle_alpha.join().expect("Alpha panic");
+    let res_b = handle_beta.join().expect("Beta panic");
+
+    (res_a, res_b)
+}
+
+// 2. Spawning Banyak Thread & Parallel Chunk Reduction
+pub fn parallel_sum(data: &[u64], chunks_count: usize) -> u64 {
+    let chunk_size = (data.len() + chunks_count - 1) / chunks_count;
+    let mut handles: Vec<JoinHandle<u64>> = Vec::new();
+
+    for chunk in data.chunks(chunk_size) {
+        let chunk_vec = chunk.to_vec(); // Move data mandiri ke tiap thread
+        let handle = thread::spawn(move || {
+            let partial: u64 = chunk_vec.iter().sum();
+            partial
+        });
+        handles.push(handle);
+    }
+
+    // Mengumpulkan dan menjumlahkan partial sum
+    let mut total = 0;
+    for handle in handles {
+        total += handle.join().expect("Thread error");
+    }
+    total
+}
+
+// 3. Isolasi Panic: Main thread tetap aman jika worker panic
+pub fn panic_isolation_demo() -> bool {
+    let handle = thread::spawn(|| {
+        panic!("Simulasi panic darurat di worker thread!");
+    });
+
+    // .join() menangkap panic dan mengembalikan Result::Err
+    match handle.join() {
+        Ok(_) => false,
+        Err(_) => {
+            println!("Panic berhasil diisolasi! Main thread tetap berjalan normal.");
+            true
+        }
+    }
+}
+```
 
 ---
 
 ### 11.2 Message Passing: Channels (`mpsc`)
+
+Rust menganut filosofi konkurensi legendaris Erlang & Go: *"Do not communicate by sharing memory; instead, share memory by communicating."*
+
+Pustaka standar menyediakan channel berjenis **MPSC (Multi-Producer, Single-Consumer)** di modul `std::sync::mpsc`.
+
+---
+
+#### A. Analogi Pipa Paralon Antar-Kamar
+
+Bayangkan channel seperti **pipa paralon** yang menghubungkan beberapa kamar pekerja ke meja seorang bos:
+- **`tx` (Transmitter / Pengirim)**: **Corong Masuk Pipa**. Tempat memasukkan pesan/barang.
+- **`rx` (Receiver / Penerima)**: **Ujung Keluar Pipa**. Tempat menangkap pesan/barang yang jatuh.
+
+```text
+ [ Worker 1 ] ──(tx1.send)──┐
+                            │
+ [ Worker 2 ] ──(tx2.send)──┼───> [ PIPA CHANNEL mpsc ] ───> (rx.recv) ──> [ Main Thread (Bos) ]
+                            │
+ [ Worker 3 ] ──(tx3.send)──┘
+   (Multi-Producer / tx.clone)                                           (Single-Consumer / 1 rx saja)
+```
+
+---
+
+#### B. Konsep Kunci:
+
+1. **Multi-Producer (`Sender<T>` / Transmitter)**:
+   - Struct `Sender<T>` mengimplementasikan trait `Clone`.
+   - Artinya, corong masuk pipa bisa difotokopi/diduplikasi menggunakan **`tx.clone()`**.
+   - Setiap worker thread memegang satu salinan corong untuk melempar data ke dalam pipa yang sama.
+2. **Single-Consumer (`Receiver<T>` / Receiver)**:
+   - Struct `Receiver<T>` **TIDAK** mengimplementasikan `Clone`.
+   - Di ujung pipa hanya ada **satu penerima tunggal** yang bertugas mengambil pesan secara berurutan (*FIFO: First-In, First-Out*).
+3. **Tiga Cara Mengonsumsi Pesan dari `rx`**:
+
+| Perintah | Karakteristik | Cara Kerja (Analogi) | Kapan Digunakan? |
+|---|---|---|---|
+| **`rx.recv()`** | **Blocking** | Duduk di ujung pipa, menengadahkan tangan lalu **tidur**. Baru bangun saat ada barang jatuh atau channel ditutup. Mengembalikan `Result<T, RecvError>`. | Saat thread penerima tidak punya tugas lain selain menunggu data tiba. |
+| **`rx.try_recv()`** | **Non-blocking** | Cuma **melirik sekilas** ke lubang pipa. Jika ada barang langsung ambil (`Ok(T)`), jika kosong langsung lanjut kerja tanpa menunggu (`Err(TryRecvError::Empty)`). | Pada aplikasi game loop, UI/GUI, atau background poller yang tidak boleh macet. |
+| **`for msg in rx { }`** | **Iterator Blocking** | Berdiri di ujung pipa, mengambil pesan satu per satu secara kontinu **sampai seluruh pipa resmi ditutup**. | Pola paling standar untuk memproses batch tugas worker sampai tuntas. |
+
+---
+
+#### C. Mengapa `drop(tx)` pada Main Thread SANGAT KRUSIAL?
+
+> **Aturan Mutlak Rust:** Channel hanya dinyatakan **resmi ditutup (*Disconnected*)** jika **SEMUA instance `Sender` (`tx`) yang masih hidup di memori telah di-drop / dihancurkan**.
+
+Mari bedah skenario yang sering menyebabkan **DEADLOCK / PROGRAM MACET**:
+1. Di Main Thread, kamu membuat: `let (tx, rx) = mpsc::channel();` *(Sekarang ada 1 buah `tx` di Main Thread)*.
+2. Kamu kloning: `let tx1 = tx.clone();` lalu diberikan ke Worker Thread *(Sekarang ada 2 buah `tx`: 1 di Main, 1 di Worker)*.
+3. Worker selesai bekerja, thread worker mati $\rightarrow$ `tx1` otomatis hancur (*drop*).
+4. Kamu di Main Thread mulai membaca: `for msg in rx { ... }`.
+
+**HASILNYA: Program HANG / DEADLOCK selamanya!**
+**Penyebab:** Main Thread masih mengantongi `tx` asli di tangannya. Receiver berpikir: *"Saya tidak boleh berhenti, karena Main Thread masih memegang `tx` asli, siapa tahu nanti dia mau kirim data lagi!"*
+
+**SOLUSI:**
+Panggil **`drop(tx)`** pada transmitter asli di Main Thread tepat setelah semua worker selesai di-spawn. Karena Main Thread hanya bertugas MENDENGAR (`rx`), bukan MENGIRIM (`tx`):
+
+```rust
+let (tx, rx) = mpsc::channel();
+
+for id in 1..=3 {
+    let thread_tx = tx.clone();
+    thread::spawn(move || {
+        thread_tx.send(format!("Laporan dari worker #{}", id)).unwrap();
+        // thread_tx hancur otomatis saat worker thread selesai
+    });
+}
+
+// ⚠️ WAJIB: Buang corong asli di main thread agar channel bisa ditutup!
+drop(tx);
+
+// Begitu worker terakhir selesai, SEMUA tx sudah hancur -> loop rx langsung selesai mulus!
+for laporan in rx {
+    println!("Diterima: {}", laporan);
+}
+println!("Semua laporan selesai diproses.");
+```
+
+---
+
+#### D. Pipa Biasa (`channel`) vs Pipa Kaku Berkapasitas (`sync_channel`)
+
+1. **`mpsc::channel()` (Unbounded / Pipa Elastis Tak Terbatas)**:
+   - Kapasitas buffer tidak terbatas di RAM.
+   - Operasi `tx.send()` tidak pernah menahan pengirim (langsung sukses seketika).
+   - *Risiko:* Jika worker memproduksi 10.000 pesan/detik tapi consumer lambat, memori RAM bisa bengkak (*memory leak/OOM*).
+2. **`mpsc::sync_channel(size)` (Bounded / Pipa Kaku Berukuran `size`)**:
+   - Pipa hanya muat sebanyak `size` pesan.
+   - Memberikan mekanisme **backpressure**: jika pipa sudah penuh dan belum dibaca oleh receiver, maka pemanggilan `tx.send()` berikutnya akan **memblokir / menahan thread pengirim** sampai ada ruang yang dikosongkan oleh receiver.
+
+---
+
+#### E. Contoh Implementasi Lengkap (Selaras dengan `fase11_task_2.rs`):
 ```rust
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-fn mpsc_demo() {
+pub fn multi_producer_demo() {
     let (tx, rx) = mpsc::channel();
 
-    // Spawn 3 worker threads mengirim pesan ke 1 receiver
-    for i in 1..=3 {
+    // 1. Multi-Producer: Spawn 3 worker dengan tx.clone()
+    for id in 1..=3 {
         let thread_tx = tx.clone();
         thread::spawn(move || {
-            let msg = format!("Task #{} selesai", i);
-            thread::sleep(Duration::from_millis(50));
+            let msg = format!("Data dari sensor #{}", id);
+            thread::sleep(Duration::from_millis(10));
             thread_tx.send(msg).unwrap();
         });
     }
-    drop(tx); // Drop transmitter utama agar receiver tahu kapan channel ditutup
 
+    // 2. KRUSIAL: Drop transmitter utama di main thread
+    // Tanpa drop(tx), loop 'for msg in rx' akan deadlock selamanya!
+    drop(tx);
+
+    // 3. Single Consumer: Mengonsumsi pesan hingga channel tertutup
     for received in rx {
-        println!("Diterima di main thread: {}", received);
+        println!("Diterima: {}", received);
     }
 }
 ```
+
+---
+
+### 11.3 Marker Traits: `Send` & `Sync` (Thread-Safety Guarantees)
+
+Di Rust, keamanan konkurensi (*fearless concurrency*) dijamin langsung oleh sistem tipe pada saat kompilasi melalui dua buah **Marker Traits**: `Send` dan `Sync`.
+
+> **Apa itu Marker Trait?**
+> Trait kosong yang tidak memiliki method (`pub unsafe trait Send {}`). Trait ini berfungsi sebagai "label sertifikasi keamanan" otomatis (*auto trait*) yang disematkan oleh compiler ke tipe data Anda.
+
+---
+
+#### A. Definisi: `Send` vs `Sync`
+
+1. **`Send` (Transfer of Ownership)**:
+   - Menandakan bahwa **kepemilikan (*ownership*)** tipe data `T` aman dipindahkan (*moved / transferred*) melintasi batas thread.
+   - Jika suatu tipe adalah `Send`, kita bisa mengoper nilainya ke dalam closure `thread::spawn(move || { ... })` atau mengirimkannya lewat channel `tx.send(val)`.
+2. **`Sync` (Concurrent Shared References)**:
+   - Menandakan bahwa tipe data `T` aman diakses melalui **referensi bersama (`&T`)** oleh banyak thread secara simultan tanpa memicu *data race*.
+   - Jika suatu tipe adalah `Sync`, banyak thread boleh membaca nilai yang sama secara paralel.
+
+---
+
+#### B. Hubungan Krusial: `T is Sync <=> &T is Send`
+
+Aturan emas konkurensi Rust menyatakan:
+$$\mathbf{T \text{ adalah } Sync \iff \&T \text{ adalah } Send}$$
+
+**Mengapa demikian?**
+Bayangkan Anda ingin membagikan data `T` ke thread lain tanpa memindahkan kepemilikannya. Anda akan meminjamkan referensi `&T` ke thread tersebut.
+Ketika referensi `&T` diserahkan ke thread lain, objek yang sebenarnya *dikirim (*Send*)* adalah pointer referensi `&T` itu sendiri!
+Oleh karena itu:
+- Jika referensi `&T` **aman dipindahkan** ke thread lain (`&T: Send`), maka thread tersebut aman mengakses `T` bersamaan dengan thread pembuatnya.
+- Ini berarti tipe `T` dijamin aman untuk *concurrency* alias berstatus **`Sync`**!
+
+---
+
+#### C. Tabel Klasifikasi Tipe Data Populer
+
+| Tipe Data | `Send`? | `Sync`? | Alasan & Catatan |
+|---|---|---|---|
+| **Primitif (`i32`, `f64`, `bool`, `char`)** | **Ya** | **Ya** | Nilai independen, immutable secara default, aman dibaca dari banyak thread. |
+| **`String` / `Vec<T>`** | **Ya** | **Ya** | Heap-allocated dengan kepemilikan tunggal yang bersih (selama `T: Send + Sync`). |
+| **`Arc<T>`** | **Ya** | **Ya** | *Atomic Reference Counting*. Sinkronisasi thread-safe counter. |
+| **`Mutex<T>` / `RwLock<T>`** | **Ya** | **Ya** | Menyediakan kunci eksklusif (*locking*), aman dimutasi bersama lintas thread. |
+| **`AtomicBool` / `AtomicI32`** | **Ya** | **Ya** | Operasi atomik tingkat instruksi CPU (lock-free). |
+| **`RefCell<T>` / `Cell<T>`** | **Ya** | **TIDAK** | **Boleh dipindah kepemilikan ke thread lain**, tetapi **DILARANG diakses bersama via `&RefCell`** karena borrow-counter internalnya tidak atomic (bisa race condition). |
+| **`mpsc::Receiver<T>`** | **Ya** | **TIDAK** | Sifatnya *Single-Consumer*. Boleh dipindah ke thread lain, tapi tidak boleh dibaca bersamaan. |
+| **`Rc<T>`** | **TIDAK** | **TIDAK** | *Reference counting* biasa (non-atomic). Clone/drop bersamaan dari 2 thread dapat merusak memori (*double free*). |
+| **`*const T` / `*mut T`** | **TIDAK** | **TIDAK** | Raw pointer C tidak memiliki garansi keamanan memori dari compiler. |
+
+---
+
+#### D. Compile-Time Trait Bounds Assertion & Contoh Kode (Selaras dengan `fase11_task_3.rs`):
+
+Kita dapat menguji sifat `Send` dan `Sync` suatu tipe data langsung saat kompilasi menggunakan helper function statis:
+
+```rust
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+// 1. Compile-Time Helper: Jika tipe tidak sesuai, kompilator langsung menolak!
+const fn assert_send<T: Send>() {}
+const fn assert_sync<T: Sync>() {}
+
+fn verify_traits() {
+    assert_send::<String>();
+    assert_sync::<String>();
+
+    // RefCell adalah Send, tapi BUKAN Sync:
+    assert_send::<RefCell<i32>>();
+    // assert_sync::<RefCell<i32>>(); // ❌ ERROR KOMPILASI jika di-uncomment!
+
+    // Rc bukan Send dan bukan Sync:
+    // assert_send::<Rc<i32>>();      // ❌ ERROR KOMPILASI!
+    // assert_sync::<Rc<i32>>();      // ❌ ERROR KOMPILASI!
+}
+
+// 2. Pembuktian Hubungan: T is Sync <=> &T is Send
+pub fn demonstrate_sync_ref_send() -> i32 {
+    let shared_counter = Arc::new(Mutex::new(0));
+    let mut handles = Vec::new();
+
+    for _ in 0..2 {
+        let counter_ref = Arc::clone(&shared_counter);
+        // Mutex<i32> adalah Sync -> maka &Mutex<i32> aman di-Send ke closure thread!
+        let handle = thread::spawn(move || {
+            let mut guard = counter_ref.lock().unwrap();
+            *guard += 50;
+        });
+        handles.push(handle);
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    let final_val = *shared_counter.lock().unwrap();
+    final_val // 100
+}
+```
+
+---
+
+### 11.4 Mini Project: Worker Pool CLI Architecture
+
+Worker Pool adalah pola arsitektur konkurensi standar industri untuk memproses volume tugas (*jobs*) dalam jumlah besar secara simultan tanpa overhead boros dari membuat dan menghancurkan OS thread berulang kali.
+
+```text
+       ┌─────────────┐
+       │ Main Thread │
+       └──────┬──────┘
+              │ 1. Kirim Job (Job Channel)
+              ▼
+   ┌───────────────────────┐
+   │ Arc<Mutex<Receiver>>  │ <── Antrean Bersama (Job Queue)
+   └──┬───────┬───────┬────┘
+      │       │       │       │ 2. Worker berebut job secara aman
+      ▼       ▼       ▼       ▼
+   ┌──────┐┌──────┐┌──────┐┌──────┐
+   │ W-1  ││ W-2  ││ W-3  ││ W-4  │ (4 Worker Threads Standby)
+   └──┬───┘└──┬───┘└──┬───┘└──┬───┘
+      │       │       │       │ 3. Kirim hasil (Result Channel)
+      └───────┼───────┼───────┘
+              ▼
+     ┌─────────────────┐
+     │ Result Receiver │ <── 4. Main Thread Kumpulkan Hasil
+     └─────────────────┘
+```
+
+#### Alur Kerja & Fitur Utama:
+1. **Kirim Job (`job_tx.send(job)`)**:
+   Main thread memasukkan paket pekerjaan (`Job`) yang memuat data dan beban komputasi ke dalam *Job Channel*.
+2. **Worker Memproses Job (`Arc<Mutex<Receiver<Job>>>`)**:
+   Karena `mpsc::Receiver` di standard library bersifat *Single-Consumer*, kita membungkusnya dalam `Arc<Mutex<...>>`. Setiap worker thread mengunci Mutex secara bergiliran untuk mengambil satu job, melepaskan kunci, lalu memproses tugas tersebut secara paralel tanpa menahan antrean worker lain.
+3. **Worker Mengirim Hasil (`result_tx.send(result)`)**:
+   Setelah tugas selesai diproses, worker membungkus luaran ke dalam `JobResult` dan mengirimkannya kembali ke *Result Channel*.
+4. **Main Mengumpulkan Hasil (`result_rx.recv()`)**:
+   Main thread mengonsumsi seluruh laporan `JobResult` dari *Result Channel* dan mencetak rekap status eksekusi.
+5. **Graceful Completion & Shutdown**:
+   Main thread mendrop `job_tx`. Ketika buffer job kosong dan `job_tx` sudah musnah, pemanggilan `lock.recv()` pada worker akan mengembalikan `None`. Seluruh worker thread keluar dari loop kerja secara anggun (*clean exit*), dan dipanggil `.join()` hingga tidak ada thread liar (*zombie thread*).
+
+#### Contoh Implementasi (Selaras dengan `mini_project_11.rs`):
+```rust
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+
+pub struct Job {
+    pub id: usize,
+    pub payload: String,
+}
+
+pub struct JobResult {
+    pub job_id: usize,
+    pub worker_id: usize,
+    pub output: String,
+}
+
+pub struct WorkerPool {
+    workers: Vec<Option<JoinHandle<()>>>,
+    job_tx: Option<Sender<Job>>,
+    result_rx: Receiver<JobResult>,
+}
+
+impl WorkerPool {
+    pub fn new(num_workers: usize) -> Self {
+        let (job_tx, job_rx) = mpsc::channel::<Job>();
+        let (result_tx, result_rx) = mpsc::channel::<JobResult>();
+        let shared_job_rx = Arc::new(Mutex::new(job_rx));
+
+        let mut workers = Vec::with_capacity(num_workers);
+        for id in 1..=num_workers {
+            let rx = Arc::clone(&shared_job_rx);
+            let tx = result_tx.clone();
+
+            let handle = thread::spawn(move || {
+                while let Ok(job) = rx.lock().unwrap().recv() {
+                    let res = JobResult {
+                        job_id: job.id,
+                        worker_id: id,
+                        output: format!("Diproses oleh W-{}", id),
+                    };
+                    let _ = tx.send(res);
+                }
+            });
+            workers.push(Some(handle));
+        }
+
+        Self {
+            workers,
+            job_tx: Some(job_tx),
+            result_rx,
+        }
+    }
+
+    pub fn shutdown(&mut self) {
+        drop(self.job_tx.take()); // Tutup antrean job
+        for handle in &mut self.workers {
+            if let Some(h) = handle.take() {
+                let _ = h.join();
+            }
+        }
+    }
+}
+```
+
+---
+
+#### Evaluasi Kelulusan FASE 11:
+1. **Concurrency vs Parallelism**:
+   - **Concurrency (Struktur Program)**: Desain menangani banyak hal secara bergantian atau tumpang tindih (*dealing with lots of things at once*). Bisa berjalan di 1 CPU core via time-slicing.
+   - **Parallelism (Eksekusi Fisik)**: Eksekusi komputasi nyata secara bersamaan pada waktu yang sama di beberapa CPU core fisik (*doing lots of things at once*).
+2. **`Send` vs `Sync`**:
+   - `Send`: Garansi kepemilikan (*ownership*) tipe aman dipindahkan melintasi batas thread.
+   - `Sync`: Garansi referensi bersama (`&T`) aman dibaca paralel oleh beberapa thread sekaligus ($\mathbf{T: Sync \iff \&T: Send}$).
+3. **Pola Worker Pool**:
+   - Mengalokasikan sejumlah OS thread tetap di awal, mendistribusikan antrean kerja lewat channel sinkron, dan mengumpulkan hasil secara terkontrol.
 
 ---
 
 ## FASE 12: Modern Asynchronous Rust & Tokio Runtime
 
-### 12.1 Cara Kerja Asynchronous Rust di Balik Layar
-Async Rust bersifat **pull-based** (kooperatif). Sebuah `Future` tidak melakukan komputasi apapun sampai ia di-*poll* oleh executor runtime.
+### 12.1 Cara Kerja Asynchronous Rust di Balik Layar (Mental Model: Future, Poll, Executor, Waker, & Pin)
 
+Tidak seperti runtime bahasa lain (seperti JavaScript atau Go), bahasa Rust **tidak menyertakan built-in asynchronous runtime** di dalam standard library-nya. Standard library Rust hanya mendefinisikan kontrak tipe dasar: trait `Future`, `Context`, `Poll`, `Pin`, dan `Waker`.
+
+#### 1. Mengapa Future di Rust Bersifat Lazy (Pull-Based vs Push-Based)
+- **Push-Based / Eager (JavaScript Promise, Go Goroutine)**:
+  Begitu sebuah `Promise` dibuat di JavaScript (`new Promise(...)`), eksekusi fungsinya langsung berjalan di background event loop tanpa menunggu `then()` atau `await`.
+- **Pull-Based / Lazy (Rust `Future`)**:
+  Sebuah `Future` di Rust hanyalah sebuah *state machine pasif* (struct/enum). Jika Anda memanggil `async fn` atau membuat `Future` tetapi tidak pernah memanggil `.await` atau menyerahkannya ke executor untuk di-`poll()`, maka **nol baris kode yang dieksekusi** dan tidak ada alokasi thread atau memori heap tersembunyi.
+- **Keuntungan Desain Lazy**:
+  1. **Zero-Cost Abstraction**: Tidak ada overhead thread OS atau alokasi memori sebelum dibutuhkan.
+  2. **Zero-Cost Cancellation**: Membatalkan future sangat sederhana dan aman: cukup berhenti mem-poll dan biarkan struct Future di-`drop` (`Drop` trait). Tidak memerlukan cancellation token yang kompleks.
+  3. **Komposisi Kombinator Sangat Efisien**: Operasi seperti `tokio::select!` atau timeout dapat memilih future mana yang di-poll dan membatalkan cabang yang kalah tanpa membebani runtime.
+
+#### 2. Trait `Future` dan Metode `poll()`
+Definisi trait `std::future::Future` pada standard library:
 ```rust
-// Definisi konseptual trait Future di Standard Library:
 pub trait Future {
     type Output;
-    // fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
+}
+
+pub enum Poll<T> {
+    Ready(T),
+    Pending,
 }
 ```
-- **`Pin`**: Mengunci lokasi memori Future agar tidak dipindahkan saat referensi internalnya aktif (*self-referential structs*).
-- **`Waker`**: Mekanisme sinyal bagi task untuk memberitahu runtime executor: *"Saya sudah siap di-poll kembali karena I/O sudah selesai"*.
+- Saat sebuah Future di-poll oleh executor:
+  - Mengembalikan `Poll::Ready(output)` jika komputasi/operasi I/O telah rampung.
+  - Mengembalikan `Poll::Pending` jika masih menunggu event eksternal (misal timer hardware, paket data socket TCP, pembacaan file disk).
+- Siklus Polling State Machine:
+  ```text
+  [Created: Lazy/Dormant] 
+             ↓
+        executor.poll()
+             ↓
+     +---------------+
+     | Belum siap?   | ---> return Poll::Pending (Simpan cx.waker())
+     +---------------+                           ↓ (Tidur/Parkir thread)
+             | Selesai!                          ↓ (Event selesai -> waker.wake())
+             ↓                                   ↓
+    return Poll::Ready(val) <--- executor.poll() kembali
+  ```
+
+#### 3. Peran `Waker` dan `Context`: Menghindari 100% CPU Spinning
+Jika sebuah Future mengembalikan `Poll::Pending`, bagaimana executor tahu kapan harus mem-poll lagi?
+- **Tanpa Waker**: Executor harus melakukan *busy-waiting* (looping `while pending { poll() }`), yang akan memakan utilisasi CPU hingga 100% secara sia-sia.
+- **Dengan Waker (`std::task::Waker`)**:
+  - Saat `poll()` mengembalikan `Poll::Pending`, future mengkloning waker dari `cx.waker()`.
+  - Future mendaftarkan waker tersebut ke event source (misal thread helper atau OS epoll/kqueue).
+  - Executor memarkir (menidurkan) thread (`thread::park()`).
+  - Ketika data/event siap, event source memanggil `waker.wake()`.
+  - `waker.wake()` membangunkan thread executor (`thread::unpark()`) dan memasukkan task kembali ke antrean siap jalan (*run queue*) untuk di-poll kembali.
+
+#### 4. Peran `Executor` & Runtime (`block_on`)
+Karena standard library Rust tidak menyediakan loop eksekutor bawaan, aplikasi membutuhkan *executor* (seperti `tokio`, `async-std`, atau mini-executor buatan sendiri).
+Executor bertanggung jawab untuk:
+1. Mengemas Future ke dalam `Pin`.
+2. Menyediakan `Context` yang berisi `Waker`.
+3. Memanggil `poll()` berulang kali hingga menghasilkan `Poll::Ready`.
+4. Menidurkan thread ketika task berstatus `Pending`.
+
+#### 5. Mengapa `Pin` dan `Unpin` Ada (Self-Referential Structs)
+- **Masalah**: Ketika kita menulis `async fn`, compiler Rust mengubahnya menjadi enum state machine. Jika di dalam `async fn` terdapat variabel lokal yang direferensikan melintasi titik `.await`, struct state machine tersebut akan menyimpan pointer ke field di dalam dirinya sendiri (**Self-Referential Struct**).
+  ```rust
+  async {
+      let mut text = String::from("Hello");
+      let ptr = &text; // pointer menunjuk ke field di dalam frame yang sama
+      timer_sleep().await; // State disimpan di dalam struct Future!
+      println!("{}", ptr);
+  }
+  ```
+- **Bahaya Memory Safety**: Jika struct yang bersifat self-referential ini dipindahkan (*move*) ke alamat memori lain (misalnya dioper ke fungsi lain, dimasukkan ke Vec, atau di-swap):
+  - Alamat `text` berpindah ke alamat fisik baru.
+  - Namun `ptr` masih menunjuk ke alamat fisik lama!
+  - Menghasilkan **dangling pointer** dan **Undefined Behavior** fatal.
+- **Solusi dengan `Pin`**:
+  - `Pin<P>` adalah wrapper pointer (seperti `Pin<&mut T>` atau `Pin<Box<T>>`) yang menjamin bahwa data bertipe `T` **tidak akan pernah dipindahkan (moved) dari alamat memorinya** selama belum di-drop.
+  - Trait marker `Unpin`: Tipe data reguler (`i32`, `String`, struct biasa) secara otomatis mengimplementasikan `Unpin` (bebas dipindahkan meski di dalam `Pin`).
+  - Tipe `!Unpin` (seperti compiler-generated async futures yang self-referential) terkunci secara permanen di alamat memorinya.
+  - Method `poll(self: Pin<&mut Self>, ...)` mewajibkan future di-pin sebelum dapat dieksekusi, sehingga keamanan memori terjamin 100% pada saat compile time!
+
+#### 6. Implementasi Nyata Mini-Executor & Future Manual (`fase12_task_1.rs`)
+Rujuk implementasi lengkap pada `rust-learning-lab/src/fase12_task_1.rs` yang mengilustrasikan:
+1. `LazyCalculationFuture`: Pembuktian bahwa future tidak melakukan mutasi apapun sebelum di-poll.
+2. `CountdownFuture`: Pelacakan multi-step `Poll::Pending` hingga `Poll::Ready`.
+3. `ThreadWaker` & `mini_block_on`: Pembuatan executor `block_on` murni standard library dengan thread parking dan waking.
+4. `AsyncTimerYieldFuture`: Simulasi async delay menggunakan worker thread terpisah yang memicu `waker.wake()`.
+5. `UnsafeSelfRefSimulator`: Simulasi self-referential struct untuk membuktikan secara empiris bahwa pemindahan memori tanpa `Pin` menghasilkan pointer invalid (dangling).
 
 ---
 
-### 12.2 Task Concurrency dengan Tokio
-- `tokio::spawn`: Menjadwalkan async task baru secara independen ke thread pool work-stealing scheduler Tokio. Mengembalikan `JoinHandle`.
-- `tokio::select!`: Memultipleks beberapa Future dalam satu task tunggal (mengambil cabang pertama yang selesai).
-- `tokio::task::spawn_blocking`: Menjalankan komputasi CPU-berat agar thread pool I/O async tidak kelaparan (*starvation*).
 
+### 12.2 Modern Tokio Asynchronous Runtime (Task 2)
+
+**Tokio** adalah platform runtime asynchronous standar industri untuk Rust yang menyediakan event loop berbasis I/O non-blocking (epoll/kqueue/IOCP), work-stealing thread pool scheduler, pengatur waktu (timers), dan abstraksi task concurrency.
+
+```bash
+# Menambahkan Tokio dengan seluruh modul bawaan ke Cargo.toml:
+cargo add tokio --features full
+```
+
+#### 1. Makro `#[tokio::main]` & Inisialisasi Runtime
+Rust `fn main()` standar adalah fungsi sinkron (synchronous). Untuk menjalankan kode asynchronous di tingkat atas, runtime Tokio harus dibangun terlebih dahulu.
+
+Makro `#[tokio::main]` adalah syntactic sugar compiler yang mengekspansi kode:
 ```rust
-use tokio::time::{sleep, Duration};
-
-async fn async_worker(id: u32) -> String {
-    sleep(Duration::from_millis(100)).await;
-    format!("Worker {} selesai", id)
-}
-
 #[tokio::main]
-async fn tokio_orchestration() {
-    // 1. Spawning Concurrent Background Tasks
-    let handle = tokio::spawn(async {
-        async_worker(1).await
-    });
+async fn main() {
+    println!("Hello from Tokio!");
+}
+```
+Menjadi ekivalen manual:
+```rust
+fn main() {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Gagal membuat runtime")
+        .block_on(async {
+            println!("Hello from Tokio!");
+        });
+}
+```
 
-    // 2. Select: Menunggu operasi atau Timeout
-    tokio::select! {
-        res = handle => println!("Hasil: {}", res.unwrap()),
-        _ = sleep(Duration::from_millis(500)) => println!("Timeout terjadi!"),
+#### 2. `async fn` dan Operator `.await`
+- `async fn`: Mengubah fungsi biasa menjadi fungsi yang mengembalikan compiler-generated struct `impl Future<Output = T>`.
+- `.await`: Menangguhkan eksekusi fungsi saat ini secara kooperatif jika future belum siap (`Poll::Pending`), mengembalikan kendali ke thread pool Tokio agar thread tersebut dapat mengeksekusi task lain. Saat event selesai, task dilanjutkan persis di titik `.await`.
+
+#### 3. `tokio::spawn` & `JoinHandle` (Work-Stealing Task Concurrency)
+- `tokio::spawn(async { ... })`: Menjadwalkan async closure/future ke thread pool Tokio secara independen (sering disebut *green thread* / *lightweight task*).
+- Karakteristik:
+  1. **Alokasi Rendah**: Ukuran task Tokio hanya beberapa ratus byte (jauh lebih ringan dibanding thread OS ~2MB).
+  2. **Syarat Trait**: Task yang di-spawn harus memenuhi bound `'static + Send` karena dapat dipindahkan antar-thread worker oleh work-stealing scheduler.
+  3. **Mengembalikan `JoinHandle<T>`**: Dapat di-await untuk memperoleh output `Result<T, JoinError>`.
+  4. **Isolasi Panic**: Jika task yang di-spawn mengalami panic, thread worker Tokio TIDAK crash! Panic tersebut diisolasi dan dilaporkan melalui `join_err.is_panic()`.
+
+#### 4. `tokio::join!` vs `tokio::spawn`
+| Fitur | `tokio::join!(fut1, fut2)` | `tokio::spawn(fut)` |
+|---|---|---|
+| **Lokasi Eksekusi** | Berjalan di task & thread yang sama | Didaftarkan ke global worker thread pool |
+| **Bound Lifetime** | Mendukung referensi lokal (`'a`) | Wajib kepemilikan penuh (`'static + Send`) |
+| **Overhead** | Nol alokasi (zero allocation) | Alokasi heap untuk task state machine |
+| **Tujuan** | Menjalankan beberapa I/O konkuren bersamaan | Memproses background job independen jangka panjang |
+
+#### 5. `tokio::select!` (Multiplexing, Racing, & Cancellation)
+`tokio::select!` memantau beberapa future secara simultan pada task yang sama:
+- **Cabang Pertama Menang**: Begitu salah satu cabang menyelesaikan operasinya (`Poll::Ready`), blok kode cabang tersebut langsung dieksekusi.
+- **Auto-Cancellation**: Seluruh cabang future lain yang belum selesai akan langsung di-`drop` (dibatalkan tanpa kebocoran resource berkat model *lazy future*).
+- Sangat ideal untuk pola perlombaan koneksi (*hedged requests*), graceful shutdown, dan timeout.
+
+#### 6. `tokio::time::sleep` vs `std::thread::sleep`
+> [!CAUTION]
+> **Dilarang Keras** memanggil `std::thread::sleep()` di dalam fungsi asynchronous Tokio!
+> `std::thread::sleep` memblokir OS thread fisik secara total, sehingga puluhan task async lain yang mengantre di thread tersebut akan mengalami mogok (*thread starvation*).
+> **Selalu gunakan `tokio::time::sleep(duration).await`** yang mendaftarkan timer ke driver Tokio tanpa memblokir thread.
+
+#### 7. `tokio::time::timeout` (Deadlines Protection)
+Mencegah operasi I/O (seperti HTTP request atau query database) menggantung tanpa batas waktu:
+```rust
+use tokio::time::{timeout, Duration};
+
+let res = timeout(Duration::from_millis(50), fetch_sensor(10)).await;
+match res {
+    Ok(data) => println!("Sukses sebelum deadline: {:?}", data),
+    Err(_elapsed) => eprintln!("Operasi dibatalkan karena melebihi batas waktu!"),
+}
+```
+
+#### 8. `tokio::task::spawn_blocking` (Offloading Heavy CPU Work)
+Jika program harus menjalankan komputasi intensif CPU (misal enkripsi, parsing JSON gigabyte, kompresi gambar, atau library FFI sinkron C):
+- Gunakan `tokio::task::spawn_blocking(|| { ... })`.
+- Tokio mengalihkan closure tersebut ke **blocking thread pool terpisah** (dapat berkembang hingga 512 thread OS bawaan), menjaga core async worker thread pool tetap responsif melayani ribuan request I/O.
+
+#### 9. Rujukan Kode Implementasi Lengkap
+- Proyek demonstrasi modul lab: [`rust-learning-lab/src/fase12_task_2.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/fase12_task_2.rs)
+- Proyek standalone hands-on: [`tokio-lab/src/main.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/tokio-lab/src/main.rs)
+
+---
+
+### 12.3 Concurrent Tasks & Aggregation (Task 3)
+
+Dalam arsitektur backend asynchronous, seringkali kita perlu meluncurkan sejumlah task secara simultan (batch spawning)—misalnya memanggil 10 API vendor eksternal, membaca 10 file partisi, atau memproses 10 item antrean sekaligus.
+
+#### 1. Batch Spawning dengan Tokio Task
+- **Efisiensi Memori**: Membuat 10 atau 10.000 Tokio task jauh lebih murah daripada membuat 10 OS Thread. Sebuah OS thread memerlukan alokasi stack 2MB–8MB, sedangkan sebuah Tokio task hanyalah struct state machine berukuran beberapa ratus byte di heap.
+- **Eksekusi Asinkron**: Setiap task berjalan independen di thread pool work-stealing. Task yang memiliki durasi sleep/tunggu lebih singkat akan selesai lebih awal tanpa terhalang oleh task yang lambat (*non-blocking*).
+
+#### 2. Pola 1: Pengumpulan Hasil via `Vec<JoinHandle<T>>`
+Pola klasik untuk spawning batch dan menanti seluruh hasilnya:
+```rust
+let mut handles = Vec::with_capacity(10);
+
+for id in 1..=10 {
+    let sleep_ms = ((11 - id) * 5) as u64; // Delay berbeda
+    let handle = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+        format!("Task {} selesai", id)
+    });
+    handles.push(handle);
+}
+
+// Join seluruh task dari parent
+let mut results = Vec::new();
+for handle in handles {
+    let res = handle.await.expect("Task panic!");
+    results.push(res);
+}
+```
+> [!NOTE]
+> Pola `Vec<JoinHandle>` memproses hasil secara berurutan sesuai urutan indeks di vector. Jika Task 1 selesai dalam 50ms dan Task 10 selesai dalam 5ms, parent loop tetap menunggu `handle[0]` selesai terlebih dahulu.
+
+#### 3. Pola 2: Pengumpulan Hasil via `tokio::task::JoinSet<T>` (Idiomatic Modern Tokio)
+`JoinSet` adalah koleksi task bawaan Tokio (sejak v1.21) yang dirancang khusus untuk mengelola batch task dinamis:
+```rust
+use tokio::task::JoinSet;
+
+let mut set = JoinSet::new();
+
+for id in 1..=10 {
+    let sleep_ms = ((11 - id) * 5) as u64;
+    set.spawn(async move {
+        tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+        format!("Task {} selesai", id)
+    });
+}
+
+// Hasil keluar seketika begitu task manapun selesai (Out-of-Order / Stream-like)
+while let Some(res) = set.join_next().await {
+    let output = res.expect("Worker panic");
+    println!("Diterima langsung: {}", output);
+}
+```
+**Keunggulan `JoinSet`**:
+1. **Out-of-Order Completion**: Task tercepat (sleep 5ms) langsung keluar dan diproses tanpa harus menunggu task terlama (sleep 50ms).
+2. **Auto-Cancellation on Drop**: Jika struct `JoinSet` di-drop sebelum seluruh task selesai, seluruh sisa task yang masih berjalan akan otomatis dibatalkan (*aborted*), mencegah kebocoran background task (*task leakage*).
+
+#### 4. Bukti Kinerja Konkurensi: Durasi Riil vs Sekuensial
+Pada pengujian 10 task dengan delay 50ms, 45ms, ..., 5ms:
+- **Akumulasi Sekuensial**: $50 + 45 + 40 + \dots + 5 = \mathbf{275\text{ ms}}$.
+- **Durasi Riil Konkuren Tokio**: $\approx \max(\text{durasi}) = \mathbf{52\text{ ms}}$.
+- Terbukti terjadi penghematan waktu lebih dari **80%** karena seluruh operasi tunggu I/O berjalan tumpang tindih secara konkuren!
+
+#### 5. Rujukan Kode Implementasi Lengkap
+- Modul lab: [`rust-learning-lab/src/fase12_task_3.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/fase12_task_3.rs)
+
+---
+
+### 12.4 Asynchronous Timeout Pattern & Deadline Management (Task 4)
+
+Dalam aplikasi backend atau sistem jaringan produksi, **setiap operasi asynchronous WAJIB memiliki batas waktu (deadline)**. Tanpa timeout, satu request jaringan yang hang atau database yang lambat dapat menumpuk ribuan task yang menggantung hingga menghabiskan memori dan koneksi socket (*resource exhaustion*).
+
+#### 1. Mekanisme `tokio::time::timeout`
+Fungsi `tokio::time::timeout` membungkus `Future` apapun dengan batas durasi:
+```rust
+use tokio::time::{timeout, Duration};
+
+let res = timeout(Duration::from_millis(50), simulate_api_request(100)).await;
+```
+Signature konseptual:
+```rust
+pub async fn timeout<F: Future>(duration: Duration, future: F) -> Result<F::Output, Elapsed>;
+```
+- **`Ok(T)`**: Future target berhasil selesai sebelum batas waktu berlalu.
+- **`Err(Elapsed)`**: Waktu habis sebelum future selesai. Future target langsung di-drop dan dibatalkan secara bersih (*zero-cost cancellation*).
+
+#### 2. Mekanisme Internal: Perlombaan (Race) via `tokio::select!`
+Fungsi `timeout` pada dasarnya adalah abstraksi dari `tokio::select!` yang membalapkan operasi target melawan timer sleep:
+```rust
+tokio::select! {
+    res = target_operation() => Ok(res),
+    _ = tokio::time::sleep(limit) => Err(ApiError::Timeout),
+}
+```
+Ketika cabang timer menang, cabang `target_operation` langsung dihentikan dan dilepaskan dari memori runtime.
+
+#### 3. Penanganan Error Idiomatik (`Result<T, ApiError>`)
+Praktik terbaik di Rust adalah memetakan `Elapsed` ke domain error aplikasi:
+```rust
+#[derive(Debug)]
+pub enum ApiError {
+    Timeout { endpoint: String, limit: Duration, actual_delay: Duration },
+    ServiceUnavailable(String),
+}
+
+let result = match timeout(timeout_limit, simulate_api_request(endpoint, delay)).await {
+    Ok(data) => Ok(data),
+    Err(_elapsed) => Err(ApiError::Timeout {
+        endpoint: endpoint.to_string(),
+        limit: timeout_limit,
+        actual_delay: delay,
+    }),
+};
+```
+
+#### 4. Studi Kasus Perbandingan: 100ms Request
+| Durasi Request | Batas Timeout | Durasi Eksekusi Riil | Hasil (`Result`) | Status |
+|---|---|---|---|---|
+| **100 ms** | **50 ms** | **~50 ms** | `Err(ApiError::Timeout)` | Terhenti tepat saat 50ms, hemat 50ms sisa waktu tunggu |
+| **100 ms** | **500 ms** | **~100 ms** | `Ok("200 OK")` | Sukses selesai dalam 100ms jauh sebelum batas 500ms |
+
+#### 5. Rujukan Kode Implementasi Lengkap
+- Modul lab: [`rust-learning-lab/src/fase12_task_4.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/fase12_task_4.rs)
+
+---
+
+### 12.5 Asynchronous Cancellation & Graceful Shutdown Pattern (Task 5)
+
+Dalam aplikasi backend atau sistem worker terdistribusi, **mematikan proses secara paksa (hard kill / abort) dapat menyebabkan korupsi data**, transaksi database yang menggantung, atau file log yang terpotong di tengah jalan. **Graceful Shutdown** adalah pola wajib di mana worker diberi kesempatan menyelesaikan tugas aktif (*in-flight tasks*) dan membersihkan resource sebelum program benar-benar berhenti.
+
+#### 1. Mekanisme Sinyal Shutdown di Tokio
+Ada dua pola utama untuk menyalurkan sinyal shutdown di Tokio:
+- **`tokio::sync::oneshot`**: Pola 1-ke-1 untuk mematikan worker tunggal secara presisi.
+- **`tokio::sync::watch`**: Pola broadcast 1-ke-banyak (single-producer, multi-consumer) yang paling direkomendasikan untuk mematikan sekumpulan worker pool secara serentak.
+
+#### 2. Pola Event Loop Worker Menggunakan `tokio::select!`
+Worker menjalankan loop utama yang membalapkan pekerjaan rutin melawan sinyal shutdown:
+```rust
+use tokio::sync::watch;
+
+async fn worker_loop(mut shutdown_rx: watch::Receiver<bool>) {
+    loop {
+        // Cek cepat apakah shutdown sudah aktif
+        if *shutdown_rx.borrow() {
+            break;
+        }
+
+        tokio::select! {
+            // Cabang 1: Sinyal shutdown diterima dari main task
+            changed = shutdown_rx.changed() => {
+                if changed.is_ok() && *shutdown_rx.borrow() {
+                    println!("Sinyal shutdown diterima! Memulai fase cleanup...");
+                    // Selesaikan pekerjaan in-flight & flush buffer
+                    break;
+                }
+            }
+            // Cabang 2: Melakukan pekerjaan rutin terjadwal
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                proses_pekerjaan();
+            }
+        }
     }
 }
 ```
 
+#### 3. Siklus Hidup (Lifecycle) Graceful Shutdown
+```text
+[1. Worker Berjalan Normal] 
+             ↓
+[2. Sinyal Shutdown Dikirim (SIGINT/CTRL+C atau channel.send)]
+             ↓
+[3. Fase Drain: Worker menolak job baru & menyelesaikan sisa tugas aktif]
+             ↓
+[4. Fase Cleanup: Melepaskan koneksi DB, flush buffer memori ke disk]
+             ↓
+[5. Worker Loop Berhenti Bersih -> Parent JoinHandle selesai]
+```
+
+#### 4. Rujukan Kode Implementasi Lengkap
+- Modul lab: [`rust-learning-lab/src/fase12_task_5.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/fase12_task_5.rs)
+
 ---
 
-## FASE 13: Testing & Quality Assurance
+### 12.6 Mini Project: Async Job Processor & Evaluasi Kelulusan Fase 12
 
-Rust memiliki test harness kelas satu yang terpasang langsung di dalam compiler dan Cargo.
+Mini Project Fase 12 menggabungkan seluruh pilar arsitektur Tokio runtime menjadi sebuah sistem pemrosesan antrean kerja asynchronous bertingkat produksi:
 
+```text
+  +-----------------------------------------------------------+
+  |                        API / Main                         |
+  +-----------------------------------------------------------+
+                                ↓  (submit async job)
+  +-----------------------------------------------------------+
+  |              Job Channel (tokio::sync::mpsc)              |
+  +-----------------------------------------------------------+
+                                ↓  (shared lock/pull)
+  +-----------------------------------------------------------+
+  |      Async Worker Pool (tokio::spawn + tokio::select!)    |
+  +-----------------------------------------------------------+
+           ↓ (I/O sleep)       ↓ (spawn_blocking)    ↓ (timeout)
+  +-----------------------------------------------------------+
+  |                       Processing                          |
+  +-----------------------------------------------------------+
+                                ↓  (send result)
+  +-----------------------------------------------------------+
+  |            Result Channel (tokio::sync::mpsc)             |
+  +-----------------------------------------------------------+
+                                ↓
+  +-----------------------------------------------------------+
+  |                 Result Collector & Display                |
+  +-----------------------------------------------------------+
+```
+
+#### 1. Arsitektur Komponen Utama
+1. **Job Channel (`tokio::sync::mpsc`)**: Menampung antrean pekerjaan berkapasitas terbatas (*bounded*) agar produser tidak membanjiri memori jika konsumen lambat (*backpressure*).
+2. **Worker Pool (`tokio::spawn` & `tokio::select!`)**: Worker berjalan sebagai lightweight task independen, mendengarkan pekerjaan baru atau sinyal broadcast shutdown (`tokio::sync::watch`).
+3. **Penanganan Beban Kerja Hybrid (I/O vs CPU)**:
+   - Beban I/O dijalankan langsung secara non-blocking via `.await`.
+   - Beban CPU intensif dialihkan ke **`tokio::task::spawn_blocking`** untuk menjaga kelancaran async event loop.
+   - Pekerjaan berisiko dibatasi menggunakan **`tokio::time::timeout`**.
+4. **Graceful Shutdown**: Main task menyiarkan sinyal `shutdown_tx.send(true)`, memicu seluruh worker menyelesaikan sisa in-flight tasks dan menutup koneksi secara bersih.
+
+#### 2. Rangkuman Kriteria Kelulusan FASE 12
+- **`Future`**: State machine pasif berbasis pull (lazy). Tidak menjalankan komputasi apapun sebelum di-poll oleh executor. Menghasilkan abstraksi tanpa biaya tambahan (zero-cost) dan pembatalan instan yang aman.
+- **OS Thread vs Tokio Task**:
+  - *OS Thread*: Dikelola kernel OS, alokasi memori stack besar (2MB-8MB), mahal saat context switch. Terbatas ribuan thread.
+  - *Tokio Task*: Green thread ringan (~ratusan byte) di user-space, dijadwalkan oleh work-stealing scheduler Tokio. Berpindah secara kooperatif di titik `.await`. Mampu menangani ratusan ribu task simultan.
+- **`tokio::spawn`**: Meluncurkan task asinkron independen ke runtime thread pool. Membutuhkan bound `'static + Send`. Mengembalikan `JoinHandle` yang mengisolasi panic jika worker crash.
+- **`tokio::select!`**: Memultipleks beberapa future secara simultan. Cabang pertama yang siap (`Poll::Ready`) akan dieksekusi, cabang lain langsung di-drop (dibatalkan tanpa kebocoran resource).
+- **`tokio::task::spawn_blocking`**: Wajib digunakan untuk komputasi CPU intensif atau I/O sinkron blocking. Mengalihkan eksekusi ke dedicated blocking OS thread pool (hingga 512 thread) agar worker thread async tidak mengalami *thread starvation*.
+
+#### 3. Rujukan Kode Implementasi Lengkap
+- Proyek Mini Project: [`rust-learning-lab/src/mini_project_12.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/mini_project_12.rs)
+
+---
+
+## FASE 13: Testing & Quality Assurance (Unit, Integration, Documentation, Async Tests)
+
+Pengujian di Rust bukan sekadar sarana pengecekan fungsionalitas di akhir pengembangan, melainkan pilar utama dalam desain arsitektur perangkat lunak. Sistem tipe dan model kepemilikan Rust mencegah *undefined behavior* dan *data race* pada waktu kompilasi, sedangkan pengujian otomatis menjamin kebenaran logika bisnis (*business logic correctness*).
+
+---
+
+### 13.1 Piramida dan Arsitektur Pengujian di Ekosistem Rust
+
+Rust mengkategorikan pengujian ke dalam 4 tingkatan utama:
+
+```text
+               +-----------------------------+
+               |     Documentation Tests     |  (Verifikasi contoh kode di dokumentasi)
+               +-----------------------------+
+               |      Integration Tests      |  (Black-box testing di direktori tests/)
+               +-----------------------------+
+               |         Unit Tests          |  (White-box testing di modul internal)
+               +-----------------------------+
+               |     Async Tests (Tokio)     |  (Event-loop & non-blocking execution)
+               +-----------------------------+
+```
+
+#### 1. Unit Tests (White-Box Testing)
+- **Lokasi**: Ditulis di file modul yang sama dengan kode yang diuji, di dalam submodul `mod tests`.
+- **Atribut Kompilasi Kondisional `#[cfg(test)]`**:
+  Anotasi ini memerintahkan kompilator rustc untuk **hanya mengompilasi dan menyertakan kode pengujian ketika menjalankan perintah `cargo test`**. Saat Anda mengompilasi binary rilis (`cargo build --release`), seluruh kode test diabaikan sepenuhnya sehingga tidak menambah ukuran binary ataupun overhead runtime (zero-cost abstraction).
+- **Aksesibilitas**: Unit test memiliki hak istimewa untuk menguji fungsi dan field bertingkat privat (`fn internal_helper()`), sehingga sangat ideal untuk menguji detail logika internal.
+
+#### 2. Integration Tests (Black-Box Testing)
+- **Lokasi**: Berada di luar direktori `src/`, yakni di folder khusus `tests/` pada root crate (contoh: `tests/fase13_integration_test.rs`).
+- **Kompilasi Mandiri**: Setiap file `.rs` di dalam direktori `tests/` dikompilasi oleh Cargo sebagai *crate terpisah* yang mengimpor library Anda melalui `use rust_learning_lab::...;`.
+- **Tujuan**: Memperlakukan library Anda persis seperti konsumen eksternal yang mengonsumsi crate publik Anda. File integration test **tidak bisa mengakses item privat**, sehingga memastikan bahwa API publik library telah lengkap, ergonomis, dan tidak bocor implementasi internal.
+
+#### 3. Documentation Tests (Doc-Tests)
+- **Lokasi**: Ditulis langsung di dalam komentar dokumentasi tiga garis miring (`///`) di atas deklarasi struct, enum, atau fungsi publik di library (`lib.rs`).
+- **Mencegah Documentation Rot**: Pada banyak bahasa lain, contoh kode pada dokumentasi sering kali usang dan usang seiring refactoring. Di Rust, perintah `cargo test` mengekstrak setiap blok kode markdown ` ```rust ... ``` ` pada komentar dokumentasi, lalu mengompilasi dan menjalankannya sebagai test case resmi.
+
+#### 4. Asynchronous Testing (`#[tokio::test]`)
+- **Tantangan**: Runner test bawaan Rust (`#[test]`) hanya mendukung eksekusi fungsi sinkron reguler (`fn`). Fungsi asinkron membutuhkan thread executor yang aktif untuk mem-poll future hingga selesai via `.await`.
+- **Solusi**: Atribut `#[tokio::test]` dari crate Tokio secara otomatis menginisialisasi runtime Tokio sementara (biasanya *current-thread runtime*), membungkus fungsi `async fn`, dan menjalankan future tersebut hingga selesai dengan memanggil executor `block_on`.
+
+---
+
+### 13.2 Anatomi Macro Assertions Rust
+
+Rust menyediakan macro bawaan yang kaya untuk memvalidasi kondisi pengujian:
+
+| Macro | Fungsi Utama | Contoh Pemakaian |
+| :--- | :--- | :--- |
+| `assert!(kondisi)` | Memastikan ekspresi bernilai `true` (truthy). Gagal jika `false`. | `assert!(acc.is_active());` |
+| `assert_eq!(kiri, kanan)` | Memastikan dua nilai bernilai sama (memerlukan trait `PartialEq` dan `Debug`). | `assert_eq!(acc.balance(), 1000.0);` |
+| `assert_ne!(kiri, kanan)` | Memastikan dua nilai **tidak** sama. | `assert_ne!(acc1.id, acc2.id);` |
+| `assert!(kondisi, "format", args...)` | Menambahkan pesan diagnostik kustom jika assertion gagal. | `assert_eq!(a, b, "Saldo akun {} tidak cocok!", id);` |
+
+#### Penanganan Khusus untuk Nilai Desimal (Floating Point)
+Tipe data floating point (`f64` / `f32`) tunduk pada standar presisi desimal IEEE 754, sehingga operasi aritmatika desimal sering kali menghasilkan angka pembulatan mikro (misal `0.1 + 0.2 != 0.3`).
+- **Jangan gunakan**: `assert_eq!(balance, 0.0)` pada hasil operasi berulang.
+- **Gunakan Epsilon Margin**:
+  ```rust
+  pub const FLOAT_EPSILON: f64 = 1e-7;
+  assert!(acc.balance().abs() < FLOAT_EPSILON, "Saldo harus mendekati 0");
+  ```
+
+---
+
+### 13.3 Strategi Pengujian: Success, Error, dan Edge Cases
+
+Sebuah test suite yang tangguh wajib mencakup tiga skenario utama:
+
+```text
++-------------------+---------------------------------------------------------+
+| Skenario          | Deskripsi & Fokus Pengujian                             |
++-------------------+---------------------------------------------------------+
+| 1. Success Case   | Happy path: input valid, alur bisnis normal, saldo      |
+|    (Jalur Sukses) | bertambah/berkurang dengan benar.                       |
++-------------------+---------------------------------------------------------+
+| 2. Error Case     | Sad path: input salah, batas terlampaui (overdraft),     |
+|    (Jalur Gagal)  | akun nonaktif. Memastikan Result::Err dikembalikan rapi |
+|                   | tanpa menyebabkan program mengalami panic.              |
++-------------------+---------------------------------------------------------+
+| 3. Edge Case      | Nilai batas ekstrem: string kosong/whitespace, saldo    |
+|    (Kasus Batas)  | ditarik tepat habis (0.0), pembagian dengan nol,        |
+|                   | toleransi presisi floating-point.                       |
++-------------------+---------------------------------------------------------+
+```
+
+---
+
+### 13.4 Implementasi Kode Acuan FASE 13
+
+Berikut arsitektur kode lengkap yang telah diimplementasikan pada proyek laboratorium kita:
+
+#### 1. Entitas & Logika Bisnis (`Account`)
 ```rust
-// File: src/calculator.rs
-pub fn safe_divide(a: f64, b: f64) -> Result<f64, &'static str> {
-    if b == 0.0 {
-        Err("Pembagian dengan nol dilarang")
-    } else {
-        Ok(a / b)
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub struct Account {
+    pub id: u64,
+    owner: String,
+    balance: f64,
+    is_active: bool,
 }
 
-// ==========================================
-// UNIT TESTS (Di dalam modul yang sama)
-// ==========================================
+impl Account {
+    pub fn new(id: u64, owner: &str, initial_balance: f64) -> Result<Self, AccountError> {
+        let trimmed = owner.trim();
+        if trimmed.is_empty() {
+            return Err(AccountError::InvalidOwnerName("Nama tidak boleh kosong".into()));
+        }
+        if initial_balance < 0.0 {
+            return Err(AccountError::NegativeOrZeroAmount(initial_balance));
+        }
+        Ok(Self { id, owner: trimmed.to_string(), balance: initial_balance, is_active: true })
+    }
+
+    pub fn deposit(&mut self, amount: f64) -> Result<f64, AccountError> {
+        if !self.is_active { return Err(AccountError::AccountInactive(self.id)); }
+        if amount <= 0.0 { return Err(AccountError::NegativeOrZeroAmount(amount)); }
+        self.balance += amount;
+        Ok(self.balance)
+    }
+
+    pub fn withdraw(&mut self, amount: f64) -> Result<f64, AccountError> {
+        if !self.is_active { return Err(AccountError::AccountInactive(self.id)); }
+        if amount <= 0.0 { return Err(AccountError::NegativeOrZeroAmount(amount)); }
+        if self.balance < amount {
+            return Err(AccountError::InsufficientFunds {
+                available: self.balance,
+                required: amount,
+            });
+        }
+        self.balance -= amount;
+        Ok(self.balance)
+    }
+
+    pub async fn settle_transaction_async(
+        &mut self,
+        amount: f64,
+        fee: f64,
+        latency_ms: u64,
+    ) -> Result<f64, AccountError> {
+        if !self.is_active { return Err(AccountError::AccountInactive(self.id)); }
+        let total = amount + fee;
+        if self.balance < total {
+            return Err(AccountError::InsufficientFunds { available: self.balance, required: total });
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(latency_ms)).await;
+        self.balance -= total;
+        Ok(self.balance)
+    }
+}
+```
+
+#### 2. Unit Testing Lengkap (`#[cfg(test)] mod tests`)
+```rust
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // Assertions check
     #[test]
-    fn test_divide_success() {
-        assert_eq!(safe_divide(10.0, 2.0).unwrap(), 5.0);
+    fn test_assertions_equality_and_inequality() {
+        let acc1 = Account::new(10, "User Alpha", 100.0).unwrap();
+        let acc2 = Account::new(20, "User Beta", 200.0).unwrap();
+        assert_eq!(acc1.id, 10);
+        assert_ne!(acc1.id, acc2.id);
+        assert!(acc1.is_active());
     }
 
+    // Success case
     #[test]
-    fn test_divide_by_zero() {
-        let res = safe_divide(10.0, 0.0);
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), "Pembagian dengan nol dilarang");
+    fn test_deposit_and_withdraw_success_pipeline() {
+        let mut acc = Account::new(1, "Test User", 500.0).unwrap();
+        assert_eq!(acc.deposit(250.0).unwrap(), 750.0);
+        assert_eq!(acc.withdraw(300.0).unwrap(), 450.0);
     }
 
+    // Error case
+    #[test]
+    fn test_insufficient_funds_error() {
+        let mut acc = Account::new(1, "Alice", 100.0).unwrap();
+        let err = acc.withdraw(150.0).unwrap_err();
+        assert_eq!(err, AccountError::InsufficientFunds { available: 100.0, required: 150.0 });
+    }
+
+    // Edge case
+    #[test]
+    fn test_edge_case_whitespace_owner_and_zero_balance() {
+        assert!(Account::new(1, "   \t  ", 100.0).is_err());
+
+        let mut acc = Account::new(2, "Exact Target", 150.0).unwrap();
+        assert!(acc.withdraw(150.0).is_ok());
+        assert!(acc.balance().abs() < FLOAT_EPSILON);
+    }
+
+    // Async test
     #[tokio::test]
-    async fn test_async_operation() {
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        assert!(true);
+    async fn test_async_settlement_success_with_fee() {
+        let mut acc = Account::new(55, "Merchant", 1000.0).unwrap();
+        let remaining = acc.settle_transaction_async(200.0, 5.0, 10).await.unwrap();
+        assert_eq!(remaining, 795.0);
     }
 }
 ```
+
+---
+
+### 13.5 Standar Perintah Quality Assurance di Rust
+
+Untuk memastikan kode siap produksi (*production-ready*), seluruh pipeline QA dijalankan secara bertahap:
+
+1. **`cargo fmt --check`**: Memastikan konsistensi gaya kode mengikuti standar resmi rustfmt tanpa memodifikasi file.
+2. **`cargo clippy --all-targets --all-features -- -D warnings`**: Linter komprehensif yang menganalisis antipattern, inefisiensi alokasi, dan idiomatisasi kode.
+3. **`cargo test`**: Menjalankan seluruh test suite secara otomatis (Unit Tests, Integration Tests di `tests/`, dan Documentation Tests).
+4. **`cargo build --release`**: Menghasilkan biner teroptimasi penuh dengan optimasi LTO dan stripping simbol debug.
+
+---
+
+---
+
+### 13.6 Mini Project: Test Suite Task Manager (CRUD, Error, Concurrency, Async, & Integration Tests)
+
+Mini Project Fase 13 menyatukan seluruh pilar pengujian perangkat lunak modern di Rust ke dalam sebuah arsitektur **Test Suite Task Manager**. Proyek ini mendemonstrasikan bagaimana sebuah sistem yang konkuren dan asinkron dapat diverifikasi secara deterministik tanpa celah *race condition*, *deadlock*, ataupun *unhandled errors*.
+
+```text
+                                  +-----------------------+
+                                  |      TaskManager      |
+                                  +-----------------------+
+                                              |
+                     +------------------------+------------------------+
+                     |                        |                        |
+           [State Management]        [Concurrency Guard]       [Async Execution]
+           Arc<AtomicU64> (ID)       Arc<RwLock<HashMap>>      Tokio JoinSet & Timeout
+                     |                        |                        |
+          +----------+----------+             |             +----------+----------+
+          | CRUD & State Flow   |             |             | Async Batch & Limit |
+          | Pending -> InProg   |             |             | 10 Concurrent Tasks |
+          | InProg -> Completed |             |             | 10ms Timeout Guard  |
+          +---------------------+             |             +---------------------+
+                                              |
+                                    [Multi-Thread Stress]
+                                    10 OS Threads × 20 Tasks
+                                    Simultaneous Read/Write
+```
+
+#### 1. Lima Pilar Pengujian yang Diterapkan:
+1. **CRUD Tests**:
+   - *Create*: Validasi pembuatan task baru dengan atomic ID auto-increment dan verifikasi inisialisasi status `Pending`.
+   - *Read*: Pengambilan task by ID, listing terurut, dan filtering multidimensi berdasarkan `TaskStatus` dan `TaskPriority`.
+   - *Update*: Modifikasi judul, pergantian prioritas, dan pembaruan status transisi yang valid (`Pending` -> `InProgress` -> `Completed`).
+   - *Delete*: Penghapusan record dari map internal dan verifikasi bahwa query selanjutnya mengembalikan `TaskManagerError::TaskNotFound`.
+2. **Error Tests**:
+   - Penolakan judul kosong atau hanya berisi karakter whitespace (`TaskManagerError::EmptyTitle`).
+   - Penolakan manipulasi task dengan ID fiktif pada operasi `get_task`, `delete_task`, dan `transition_status`.
+   - Proteksi State Machine: Mencegah transisi status ilegal (contoh: lompat langsung dari `Pending` ke `Completed` tanpa melewati `InProgress`, atau memodifikasi task yang telah berstatus `Completed`).
+3. **Concurrency Tests**:
+   - Menguji keandalan primitif sinkronisasi `Arc<RwLock<HashMap<u64, TaskRecord>>>` terhadap serangan akses data serentak.
+   - Meluncurkan 10 OS Thread (`std::thread::spawn`) yang serentak menulis 20 task per thread (total 200 tasks), diselingi pembacaan paralel.
+   - Memastikan tidak ada *poisoned lock*, tidak ada data race, dan seluruh 200 ID task bersifat unik (determinisme terjamin via `AtomicU64::fetch_add`).
+4. **Asynchronous Tests (`#[tokio::test]`)**:
+   - Pengujian siklus hidup pekerjaan asinkron dengan simulasi non-blocking I/O (`sleep(..).await`).
+   - Penanganan *Deadline & Timeout*: Membungkus future dengan `tokio::time::timeout`. Task yang melebihi batas waktu (misal butuh 50ms namun diberi limit 10ms) otomatis dibatalkan (*cancelled*) dan mengembalikan `TaskManagerError::ExecutionTimeout`.
+   - Pemrosesan Batch Konkuren: Memanfaatkan `tokio::task::JoinSet` untuk memproses sekumpulan task secara simultan di atas thread pool Tokio runtime.
+5. **Integration Tests (Black-Box Testing)**:
+   - Ditempatkan di direktori `tests/mini_project_13_integration_test.rs`.
+   - Menguji library crate `rust_learning_lab` dari perspektif konsumen eksternal independen tanpa akses ke detail privat modul.
+
+#### 2. Rangkuman Kode Implementasi Inti
+```rust
+#[derive(Debug, Clone)]
+pub struct TaskManager {
+    tasks: Arc<RwLock<HashMap<u64, TaskRecord>>>,
+    next_id: Arc<AtomicU64>,
+}
+
+impl TaskManager {
+    pub fn create_task(&self, title: &str, desc: &str, priority: TaskPriority) -> Result<u64, TaskManagerError> {
+        let trimmed = title.trim();
+        if trimmed.is_empty() { return Err(TaskManagerError::EmptyTitle); }
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let record = TaskRecord { id, title: trimmed.into(), description: desc.into(), priority, status: TaskStatus::Pending, created_at_ms: Self::now_ms(), completed_at_ms: None };
+        self.tasks.write().unwrap().insert(id, record);
+        Ok(id)
+    }
+
+    pub async fn execute_task_async(&self, id: u64, duration_ms: u64) -> Result<TaskRecord, TaskManagerError> {
+        self.transition_status(id, TaskStatus::InProgress)?;
+        tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
+        self.transition_status(id, TaskStatus::Completed)?;
+        self.get_task(id)
+    }
+}
+```
+
+---
+
+### 13.7 Rujukan File Proyek & Evaluasi Kelulusan FASE 13
+
+- **Modul Task Fase 13**: [`rust-learning-lab/src/fase13_task_1.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/fase13_task_1.rs)
+- **Modul Mini Project Fase 13**: [`rust-learning-lab/src/mini_project_13.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/mini_project_13.rs)
+- **Integration Test Suite**: [`rust-learning-lab/tests/mini_project_13_integration_test.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/tests/mini_project_13_integration_test.rs)
+- **Library Root & Re-exports**: [`rust-learning-lab/src/lib.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/lib.rs)
+- **Binary Entrypoint**: [`rust-learning-lab/src/main.rs`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust-learning-lab/src/main.rs)
+- **Daftar Checklist Task**: [`rust_execution_tasks.md`](file:///mnt/windows/Users/boyblanco/Documents/code/web/rust_belajar/rust_execution_tasks.md#L1138-L1157)
 
 ---
 
@@ -6261,49 +9527,494 @@ mod tests {
 
 ## FASE 14: Advanced Rust (Unsafe & Macros)
 
-### 14.1 Unsafe Rust: Batasan & Kegunaan
-Keyword `unsafe` memberi izin khusus kepada programmer untuk melakukan 5 aksi yang tidak dapat dijamin keamanannya oleh compiler:
-1. Melakukan dereferensi *raw pointers* (`*const T`, `*mut T`).
-2. Memanggil fungsi atau method `unsafe` (misal fungsi C via FFI).
-3. Mengimplementasikan trait `unsafe`.
-4. Mengubah nilai variabel `static mut`.
-5. Mengakses field dari tipe `union`.
+### 14.1 Unsafe Rust: Batasan, Raw Pointers, & Invariant Keamanan
+
+#### 1. Filosofi Safe vs Unsafe Rust
+Secara bawaan (*default*), compiler Rust adalah garda depan yang sangat ketat melalui **Borrow Checker** dan sistem tipe statis untuk mencegah seluruh bug memori (*memory bugs*) seperti *null pointer dereference*, *use-after-free*, *double free*, dan *data race*. Semua jaminan ini disebut **Safe Rust**.
+
+Namun, pada level terdalam (sistem operasi, manipulasi perangkat keras langsung, interaksi C via FFI, maupun implementasi struktur data dasar seperti `Vec`, `Box`, atau `Arc`), compiler tidak dapat membuktikan keamanan memori secara statis tanpa asumsi tambahan. Di sinilah **Unsafe Rust** dibutuhkan:
+- Keyword `unsafe` **bukan berarti kode tersebut salah atau buruk**.
+- Keyword `unsafe` adalah cara programmer memberi tahu compiler: *"Saya tahu apa yang saya lakukan. Compiler tidak perlu membuktikan bagian ini karena saya pribadi yang menjamin keamanannya."*
+- **Penting:** Blok `unsafe` **tidak** menonaktifkan borrow checker atau type checking biasa; ia hanya membuka izin untuk 5 "kemampuan khusus" (*superpowers*).
+
+#### 2. Lima Kemampuan Khusus (The 5 Superpowers of Unsafe)
+Di dalam blok `unsafe { ... }` atau fungsi `unsafe fn`, programmer diizinkan melakukan 5 hal berikut:
+1. **Melakukan dereferensi *raw pointers*** (`*const T`, `*mut T`).
+2. **Memanggil fungsi atau method `unsafe`** (contoh: fungsi C via FFI atau method internal standar seperti `slice::from_raw_parts_mut`).
+3. **Mengimplementasikan trait `unsafe`** (seperti implementasi manual trait `Send` atau `Sync`).
+4. **Mengakses atau memodifikasi variabel `static mut`**.
+5. **Mengakses field dari tipe `union`** (sering dipakai saat interoperabilitas dengan struktur union bahasa C).
+
+---
+
+#### 3. Anatomi Raw Pointers (`*const T` & `*mut T`)
+Raw pointer adalah pointer primitif tanpa perlindungan borrow checker Rust:
+- **`*const T`**: Raw pointer *immutable* (hanya untuk membaca data).
+- **`*mut T`**: Raw pointer *mutable* (dapat membaca dan mengubah data).
+
+**Karakteristik Kritis Raw Pointers:**
+- Boleh mengabaikan aturan borrowing (dapat memiliki banyak `*mut T` dan `*const T` yang menunjuk ke memori yang sama secara bersamaan).
+- Tidak dijamin menunjuk ke memori yang valid (bisa bernilai `null` atau *dangling*).
+- Tidak mengimplementasikan pembersihan otomatis (*Drop*).
+- Tidak memiliki *lifetime* yang dilacak compiler.
+
+##### A. Pembuatan Raw Pointer (Operasi Safe)
+Perhatikan bahwa **membuat** raw pointer adalah operasi yang 100% **SAFE**. Blok `unsafe` hanya diwajibkan saat **mendereferensi** (mengakses isi memori).
 
 ```rust
-fn unsafe_raw_pointers() {
-    let mut num = 42;
+use std::ptr;
 
-    // Membuat raw pointer dari referensi adalah SAFE:
-    let r1 = &num as *const i32;
-    let r2 = &mut num as *mut i32;
+let mut angka: i32 = 42;
 
-    // Dereferensi raw pointer WAJIB di dalam blok unsafe:
+// 1. Metode Klasik: Casting referensi aman
+let p_const: *const i32 = &angka as *const i32;
+let p_mut: *mut i32 = &mut angka as *mut i32;
+
+// 2. Metode Modern (Rust 2024 / 1.51+): addr_of! dan addr_of_mut!
+// Rekomendasi utama: Menghindari pembuatan referensi perantara yang berpotensi memicu UB jika memori unaligned.
+let modern_const = ptr::addr_of!(angka);
+let modern_mut = ptr::addr_of_mut!(angka);
+
+// 3. Null Pointer
+let null_ptr: *const i32 = ptr::null();
+let null_mut: *mut i32 = ptr::null_mut();
+assert!(null_ptr.is_null());
+```
+
+##### B. Dereferensi dan Modifikasi (Wajib Blok `unsafe`)
+Untuk membaca nilai (`*p_const`) atau menulis nilai (`*p_mut = ...`), kita wajib menggunakan blok `unsafe`:
+
+```rust
+let mut angka: i32 = 42;
+let p_const = std::ptr::addr_of!(angka);
+let p_mut = std::ptr::addr_of_mut!(angka);
+
+unsafe {
+    // Membaca memori
+    println!("Nilai dibaca: {}", *p_const); // Output: 42
+
+    // Menulis memori
+    *p_mut = 100;
+    println!("Nilai setelah mutasi: {}", *p_const); // Output: 100
+}
+
+println!("Nilai pada variabel safe: {}", angka); // Output: 100
+```
+
+---
+
+#### 4. Enam Invariant Keselamatan Memori (Programmer Invariants)
+Saat menulis kode `unsafe`, kegagalan programmer memenuhi kontrak keamanan memori akan memicu **Undefined Behavior (UB)**. UB dapat berakibat pada korupsi data senyap, celah eksploitasi keamanan, atau crash (*segmentation fault*). 
+
+Enam invariant pokok yang **wajib dijaga oleh programmer**:
+
+| Invariant | Nama Kontrak | Konsekuensi Pelanggaran | Cara Mitigasi |
+| :--- | :--- | :--- | :--- |
+| **1. Non-Null** | Pointer tidak boleh `0x0` saat didereferensi. | Segfault seketika pada OS modern / panic fatal hardware. | Periksa `!ptr.is_null()` sebelum dereferensi. |
+| **2. Proper Alignment** | Alamat wajib kelipatan `align_of::<T>()`. | Crash arsitektur (ARM/SPARC) atau penurunan performa ekstrem (x86). | Gunakan `(ptr as usize).is_multiple_of(align_of::<T>())`, atau gunakan `ptr::read_unaligned`. |
+| **3. Valid & Non-Dangling** | Menunjuk ke blok memori aktif yang belum di-deallocate. | *Use-after-free*, eksploitasi pembacaan memori acak. | Pastikan alokasi pemilik (*owner*) belum keluar dari scope (*drop*). |
+| **4. Proper Initialization** | Nilai bit pada memori valid untuk tipe data yang dibaca. | UB compiler optimasi (contoh: membaca bool dengan bit selain 0 atau 1). | Jangan baca memori mentah sebelum diinisialisasi; gunakan `std::mem::MaybeUninit`. |
+| **5. No Aliasing Violation** | Menghormati aturan Stacked Borrows / Tree Borrows. | Optimasi compiler menghasilkan kode salah karena menduga pointer eksklusif. | Jangan buat dua `&mut` bersamaan yang merujuk ke data yang sama. |
+| **6. Bounds Integrity** | Pointer arithmetic tidak boleh melompati alokasi buffer. | Membaca / menulis area memori program lain (*buffer overflow*). | Selalu lakukan boundary check eksplisit (`mid <= len`, dsb). |
+
+---
+
+#### 5. Pola Desain Produksi: Safe Abstraction (Pemisahan Aman di atas Unsafe)
+Aturan emas di ekosistem Rust profesional: **Jangan biarkan `unsafe` bocor ke API publik.** 
+Bungkus blok `unsafe` di dalam fungsi aman (*Safe Abstraction*) yang memvalidasi seluruh invariant di awal sebelum mengeksekusi operasi tak aman.
+
+##### Studi Kasus: Implementasi `custom_split_at_mut`
+Dalam safe Rust, kita tidak bisa memotong slice menjadi dua mutable slice sekaligus karena compiler menganggap kita meminjam `&mut` ganda dari array yang sama:
+```rust
+// Kode safe ini TIDAK BISA dikompilasi oleh borrow checker:
+// let left = &mut slice[..mid];
+// let right = &mut slice[mid..]; // ERROR: cannot borrow `slice` as mutable more than once at a time
+```
+
+Solusi dengan Safe Abstraction berbasis raw pointer:
+```rust
+use std::slice;
+
+/// Safe wrapper di atas operasi unsafe raw pointer.
+pub fn custom_split_at_mut<T>(slice: &mut [T], mid: usize) -> (&mut [T], &mut [T]) {
+    let len = slice.len();
+    // 1. Verifikasi Invariant secara ketat sebelum unsafe:
+    assert!(mid <= len, "Index mid ({}) melebihi panjang slice ({})", mid, len);
+
+    let ptr: *mut T = slice.as_mut_ptr();
+
+    // 2. Blok unsafe yang aman karena invariant telah diverifikasi:
+    // SAFETY:
+    // - ptr valid dan aligned dari slice aktif.
+    // - mid <= len menjamin pointer arithmetic ptr.add(mid) berada dalam buffer.
+    // - left dan right bersifat disjoint (tidak tumpang tindih), invariant eksklusivitas &mut terjaga.
     unsafe {
-        println!("r1 poin ke: {}", *r1);
-        *r2 = 99;
-        println!("r2 diubah jadi: {}", *r2);
+        let left = slice::from_raw_parts_mut(ptr, mid);
+        let right = slice::from_raw_parts_mut(ptr.add(mid), len - mid);
+        (left, right)
     }
+}
+```
+
+##### Demonstrasi Penggunaan:
+```rust
+let mut dataset = [10, 20, 30, 40, 50, 60];
+let (left, right) = custom_split_at_mut(&mut dataset, 3);
+
+// Kita dapat memutasi kedua potongan slice secara paralel tanpa konflik!
+for item in left.iter_mut() { *item *= 2; }
+for item in right.iter_mut() { *item += 5; }
+
+assert_eq!(dataset, [20, 40, 60, 45, 55, 65]);
+```
+
+Kode lengkap implementasi dan rangkaian pengujian untuk materi ini dapat dilihat langsung pada modul [fase14_task_1.rs](rust-learning-lab/src/fase14_task_1.rs).
+
+---
+
+### 14.2 Foreign Function Interface (FFI) & ABI Boundaries
+
+#### 1. Konsep Application Binary Interface (ABI)
+Ketika dua program yang dikompilasi (misalnya pustaka C dan aplikasi Rust) ingin saling memanggil fungsi dan bertukar struktur data di memori, mereka membutuhkan **ABI (Application Binary Interface)** yang disepakati:
+- **API (Application Programming Interface)** adalah kontrak pada level kode sumber (*source code*, nama fungsi, tipe parameter).
+- **ABI (Application Binary Interface)** adalah kontrak pada level biner dan register mesin (*machine level*):
+  1. **Calling Convention**: Register CPU mana yang dipakai untuk mengirim argumen ke fungsi (contoh: `rdi`, `rsi`, `rdx` pada AMD64 Linux), bagaimana nilai balik dikembalikan, dan siapa yang bertanggung jawab membersihkan *stack frame* (caller vs callee).
+  2. **Data Layout & Padding**: Ukuran dan urutan byte field struct. Secara default, Rust **tidak memiliki stable ABI**—compiler bebas mereorder posisi field demi optimasi memori terkecil.
+  3. **Name Mangling**: Compiler Rust mengubah nama fungsi menjadi hash unik (contoh: `_ZN17rust_learning_lab14fase14_task_214c_add_integers17h...`) untuk mendukung namespace modul dan generic. Linker bahasa C tidak memahami format ini.
+  4. **Unwinding**: Mekanisme penanganan exception/panic melintasi batasan runtime bahasa yang berbeda.
+
+Bahasa C memiliki ABI standar yang sangat stabil di hampir semua sistem operasi (*lingua franca* komputasi). Rust menggunakan ABI C untuk berkomunikasi dengan dunia luar.
+
+```rust
+/// Struktur data yang aman dilewatkan melintasi batas FFI C:
+/// Atribut `#[repr(C)]` mematikan reordering field Rust dan menyelaraskan padding persis seperti struct C.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CPoint2D {
+    pub x: f64,
+    pub y: f64,
+    pub id: i32,
 }
 ```
 
 ---
 
-### 14.2 Macro System
-- **Declarative Macros (`macro_rules!`)**: Pembangkit kode berbasis pattern matching sintaks (*Metaprogramming*).
+#### 2. Sintaks `extern "C"`: Exporting & Importing
+
+##### A. Mengekspor Fungsi Rust ke C ABI (`#[unsafe(no_mangle)]`)
+Agar fungsi Rust dapat dipanggil oleh bahasa C, Python, Go, atau runtime lainnya:
+1. Gunakan konvensi pemanggilan `extern "C"`.
+2. Gunakan tipe data C dari modul `std::ffi` (seperti `c_int`, `c_char`, `c_double`).
+3. Matikan name mangling. **Catatan Rust 2024:** Karena mematikan name mangling dapat memicu tabrakan simbol linker global, atribut ini sekarang wajib ditulis sebagai `#[unsafe(no_mangle)]`.
+
+```rust
+use std::ffi::c_int;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn c_add_integers(a: c_int, b: c_int) -> c_int {
+    a.saturating_add(b)
+}
+```
+
+##### B. Mengimpor Fungsi C Eksternal (`unsafe extern "C"`)
+Rust dapat memanggil fungsi pustaka C (seperti pustaka standar `libc`):
+- Pada **Rust 2024 Edition**, blok `extern` wajib diawali dengan keyword `unsafe` (`unsafe extern "C"`).
+- Pemanggilan fungsi eksternal C **selalu dianggap `unsafe`** oleh Rust karena compiler tidak dapat memeriksa kode C tersebut.
+
+```rust
+use std::ffi::{c_char, c_int};
+
+// Mengimpor fungsi pustaka standar C (libc)
+unsafe extern "C" {
+    pub fn abs(x: c_int) -> c_int;
+    pub fn strlen(s: *const c_char) -> usize;
+}
+
+// Pemanggilan wajib di dalam blok unsafe:
+let absolute = unsafe { abs(-42) };
+assert_eq!(absolute, 42);
+```
+
+---
+
+#### 3. Penanganan String Lintas Batas FFI (`std::ffi`)
+Tipe string Rust (`&str`, `String`) berbeda secara fundamental dengan C string:
+
+| Fitur | Rust String (`&str` / `String`) | C String (`*const c_char`) |
+| :--- | :--- | :--- |
+| **Penyimpanan Panjang** | Pointer fat (`ptr` + `len` eksplisit) | Diakhiri byte null (`\0` *null-terminated*) |
+| **Karakter Null** | Boleh memiliki byte `\0` di tengah teks | Karakter `\0` adalah penanda akhir string |
+| **Encoding** | Wajib UTF-8 valid (dijamin compiler) | Tidak ada jaminan encoding (urutan byte mentah) |
+
+Untuk menjembatani perbedaan ini, Rust menyediakan tipe khusus:
+- **`CString`**: String teralokasi di heap (*owned*) yang dijamin memiliki akhiran byte `\0` dan tidak memiliki interior null.
+- **`CStr`**: Referensi pinjaman (*borrowed*) ke string null-terminated yang valid di memori.
+
+---
+
+#### 4. Identifikasi Boundary Safe / Unsafe (The Adapter Pattern)
+Aturan terpenting dalam integrasi sistem modern: **Jangan mengekspos pemanggilan FFI mentah ke aplikasi utama.** Buatlah *Safe Adapter / Wrapper* yang memvalidasi kontrak keamanan:
+
+1. **Validasi Null Pointer**: Periksa apakah pointer `*const c_char` bernilai null sebelum diakses.
+2. **Validasi UTF-8**: Gunakan `CStr::to_str()` yang mengembalikan `Result<&str, Utf8Error>`.
+3. **Isolasi Panic (Anti-Crash Boundary)**: **Panic Rust dilarang keras unwind menembus batas ABI `extern "C"`!** Unwinding ke C runtime berujung pada *Undefined Behavior* atau abort seketika. Selalu isolasi panic dengan `std::panic::catch_unwind`.
+
+##### Contoh Implementasi Safe Adapter Lengkap:
+```rust
+use std::ffi::{CStr, CString, c_char, c_int};
+use std::panic::catch_unwind;
+
+/// Safe wrapper di atas C strlen:
+pub fn safe_c_strlen(text: &str) -> Result<usize, String> {
+    // 1. Validasi: tolak jika ada byte null di tengah string Rust
+    let c_str = CString::new(text).map_err(|e| format!("Interior null: {}", e))?;
+    
+    // 2. Transisi Unsafe: panggil libc strlen
+    let len = unsafe { strlen(c_str.as_ptr()) };
+    Ok(len)
+}
+
+/// Fungsi C ABI dengan isolasi panic Rust:
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn c_safe_divide(a: c_int, b: c_int, out: *mut c_int) -> c_int {
+    if out.is_null() { return -1; }
+
+    // Menjaga agar panic tidak membocorkan stack unwinding ke pemanggil C
+    let outcome = catch_unwind(|| {
+        if b == 0 { panic!("Divide by zero"); }
+        a / b
+    });
+
+    match outcome {
+        Ok(val) => {
+            unsafe { *out = val; }
+            0 // Exit code sukses standard C
+        }
+        Err(_) => -2, // Error ditangkap secara tertib
+    }
+}
+```
+
+Kode lengkap demonstrasi dan 9 unit test pengujian untuk materi FFI ini tersedia pada modul [fase14_task_2.rs](rust-learning-lab/src/fase14_task_2.rs).
+
+---
+
+### 14.3 Declarative Macro System (`macro_rules!`)
+
+#### 1. Konsep Metaprogramming & Higienitas Macro
+Metaprogramming adalah teknik di mana kode program dapat menulis atau menghasilkan kode program lainnya. Di Rust, macro bekerja pada level sintaks pohon token (*TokenTree* / *Abstract Syntax Tree*) saat kompilasi, bukan sekadar penggantian teks mentah (*string replacement*) seperti `#define` pada C/C++:
+- **Macro Bersifat Higienis (*Hygienic*)**: Variabel internal yang dideklarasikan di dalam macro tidak akan bertabrakan atau menimpa variabel lokal di tempat pemanggilan (*call site*).
+- **Zero-Runtime Overhead**: Seluruh ekspansi macro diselesaikan 100% pada fase kompilasi. Binary yang dihasilkan sama efisiennya dengan kode yang ditulis manual.
+- **Variadic Arguments**: Berbeda dengan fungsi Rust biasa yang memiliki jumlah parameter tetap, macro mendukung jumlah argumen dinamis (variadic) seperti `println!`, `vec!`, dan `format!`.
+
+---
+
+#### 2. Tabel Fragmen Penentu (*Designators*)
+Saat mendefinisikan matcher pada macro, kita menentukan tipe fragmen token menggunakan sintaks `$nama:designator`:
+
+| Designator | Kegunaan | Contoh Sintaks Valid |
+| :--- | :--- | :--- |
+| **`expr`** | Ekspresi apa pun yang mengevaluasi nilai | `10 + 20`, `"halo"`, `hitung_total()` |
+| **`item`** | Deklarasi item bahasa tingkat atas | `struct User { id: u64 }`, `fn test() {}` |
+| **`ident`** | Nama pengidentifikasi (identifier) mentah | Nama fungsi, variabel, nama struct, atau field |
+| **`ty`** | Tipe data Rust yang valid | `i32`, `Vec<String>`, `Option<T>` |
+| **`pat`** | Pola pencocokan (*pattern matching arm*) | `Some(x)`, `1..=10`, `(a, b)` |
+| **`block`** | Blok kode yang diapit kurung kurawal `{}` | `{ let x = 1; x + 2 }` |
+| **`stmt`** | Sebuah statement tunggal | `let x = 5;` |
+| **`literal`** | Nilai literal konstan | `42`, `"string"`, `'🦀'`, `true` |
+| **`vis`** | Penentu visibilitas | `pub`, `pub(crate)` |
+
+---
+
+#### 3. Sintaks Repetisi (`$(...)*`, `$(...)+`, `$(...)?`)
+Macro declarative menggunakan tanda dollar dan kurung `$( ... )` untuk menangkap pengulangan token:
+- **`*`**: Nol kali atau lebih (*zero or more*).
+- **`+`**: Satu kali atau lebih (*one or more*).
+- **`?`**: Nol atau satu kali (*optional*).
+- **Separator**: Diletakkan sebelum simbol repetisi, contoh: `$( $x:expr ),*` (dipisahkan koma) atau `$( $k:expr => $v:expr ),+` (pemisah pasangan key-value).
+- **Trailing Comma**: Pola `$(,)?` di akhir repetisi memungkinkan pemanggilan macro dengan koma di akhir baris (*trailing comma friendly*).
+
+---
+
+#### 4. Pola Implementasi Macro Produksi
+
+##### A. Repetition & Expression Fragment (`calculate_sum!`)
 ```rust
 #[macro_export]
-macro_rules! my_vec {
-    ( $( $x:expr ),* ) => {
+macro_rules! calculate_sum {
+    // Pola 1: Tanpa argumen
+    () => { 0 };
+    // Pola 2: Satu atau banyak ekspresi berulang
+    ( $( $x:expr ),+ $(,)? ) => {
         {
-            let mut temp_vec = Vec::new();
+            let mut total = 0;
             $(
-                temp_vec.push($x);
+                total += $x;
+            )+
+            total
+        }
+    };
+}
+
+let hasil = calculate_sum!(10, 20, 30, 40); // 100
+```
+
+##### B. Custom Delimiter & Pattern Matching (`make_map!`)
+```rust
+#[macro_export]
+macro_rules! make_map {
+    () => { std::collections::HashMap::new() };
+    ( $( $k:expr => $v:expr ),* $(,)? ) => {
+        {
+            let mut map = std::collections::HashMap::new();
+            $(
+                map.insert($k, $v);
             )*
-            temp_vec
+            map
+        }
+    };
+}
+
+let roles = make_map!(
+    "admin" => 1,
+    "editor" => 2,
+);
+```
+
+##### C. Multi-Branch Pattern Matching (`log_event!`)
+```rust
+#[macro_export]
+macro_rules! log_event {
+    (INFO: $msg:expr) => { format!("[INFO] {}", $msg) };
+    (WARN: $code:expr, $msg:expr) => { format!("[WARN][Code: {}] {}", $code, $msg) };
+    (METRIC: $name:expr => $val:expr) => { format!("[METRIC] {}={:.2}", $name, $val as f64) };
+}
+
+let msg = log_event!(WARN: 404, "Page not found");
+```
+
+##### D. Item Fragment (`$it:item`) untuk Boilerplate Derivation
+Item fragment mencakup seluruh deklarasi item beserta visibilitas dan doc-comment:
+```rust
+#[macro_export]
+macro_rules! wrap_with_debug_item {
+    ( $it:item ) => {
+        #[derive(Debug, Clone, PartialEq)]
+        $it
+    };
+}
+
+wrap_with_debug_item!(
+    pub struct SensorReading {
+        pub sensor_id: u32,
+        pub value: f64,
+    }
+);
+```
+
+##### E. Identifier & Type Fragment (`$name:ident`, `$t:ty`)
+Digunakan untuk membuat generator kode tingkat lanjut:
+```rust
+#[macro_export]
+macro_rules! define_metric_pair {
+    ($struct_name:ident { $field1:ident: $type1:ty, $field2:ident: $type2:ty }) => {
+        #[derive(Debug, Clone, PartialEq)]
+        pub struct $struct_name {
+            pub $field1: $type1,
+            pub $field2: $type2,
         }
     };
 }
 ```
+
+Kode lengkap demonstrasi dan 7 unit test pengujian untuk materi Macro System ini tersedia pada modul [fase14_task_3.rs](rust-learning-lab/src/fase14_task_3.rs).
+
+---
+
+### 14.4 Mini Project Fase 14: Utility Macro Suite & Evaluasi Kelulusan
+
+#### 1. Deskripsi Mini Project
+Mini Project Fase 14 mengintegrasikan seluruh materi Advanced Rust (Unsafe, FFI, dan Macro System) dengan merancang **Utility Macro Suite** siap pakai untuk kebutuhan produksi:
+- **`log_value!(name, value)`**: Macro pencatat log terstruktur multi-cabang dengan dukungan tag konteks.
+- **`create_vec!(...)`**: Macro inisialisasi Vector cerdas dengan optimasi pra-alokasi kapasitas (`with_capacity`) pada waktu kompilasi (*compile-time length calculation*).
+- **`retry_operation!(max, op)`**: Macro kendali alur untuk melakukan retry otomatis pada operasi fallible (`Result`).
+- **`timed_exec!(label, expr)`**: Macro benchmarking instan untuk mengukur durasi eksekusi ekspresi.
+
+---
+
+#### 2. Implementasi Macro Inti
+
+##### A. Structured Logging Macro (`log_value!`)
+```rust
+#[macro_export]
+macro_rules! log_value {
+    // Cabang 1: log_value!(name, value)
+    ($name:expr, $val:expr) => {{
+        let formatted = format!("[LOG] {} => {:?}", $name, $val);
+        println!("{}", formatted);
+        formatted
+    }};
+    // Cabang 2: log_value!(TAG: "AUTH", name, value)
+    (TAG: $tag:expr, $name:expr, $val:expr) => {{
+        let formatted = format!("[LOG][{}] {} => {:?}", $tag, $name, $val);
+        println!("{}", formatted);
+        formatted
+    }};
+}
+```
+
+##### B. Optimized Vector Macro (`create_vec!`)
+Menghindari re-alokasi memori berulang dengan menghitung jumlah token di waktu kompilasi:
+```rust
+#[macro_export]
+macro_rules! create_vec {
+    () => { Vec::new() };
+    (repeat: $elem:expr; $count:expr) => { vec![$elem; $count] };
+    ( $( $elem:expr ),+ $(,)? ) => {{
+        let count = <[()]>::len(&[ $( $crate::create_vec!(@replace_unit $elem) ),+ ]);
+        let mut v = Vec::with_capacity(count);
+        $( v.push($elem); )+
+        v
+    }};
+    (@replace_unit $e:expr) => { () };
+}
+```
+
+##### C. Resilience & Benchmark Macros (`retry_operation!` & `timed_exec!`)
+```rust
+#[macro_export]
+macro_rules! retry_operation {
+    ($max_attempts:expr, $op:expr) => {{
+        let mut attempts = 0;
+        let max = $max_attempts;
+        loop {
+            attempts += 1;
+            let res = $op;
+            match res {
+                Ok(val) => break Ok((val, attempts)),
+                Err(err) => {
+                    if attempts >= max {
+                        break Err((err, attempts));
+                    }
+                }
+            }
+        }
+    }};
+}
+```
+
+---
+
+#### 3. Jawaban Evaluasi Kelulusan FASE 14
+
+| Kriteria Lulus | Pertanyaan Pokok | Jawaban Evaluasi Mendalam |
+| :--- | :--- | :--- |
+| **1. Keberadaan Unsafe** | Mengapa keyword `unsafe` harus ada di Rust? | Perangkat keras fisik (CPU, RAM, register MMIO) tidak memiliki konsep borrow checker. Rust membutuhkan pintu darurat (*escape hatch*) untuk mengakses memori mentah, mengimplementasikan tipe data fundamental (`Vec`, `Box`, `Arc`, `String`), mengoptimalkan algoritma kritis, dan menghubungkan ekosistem pustaka C (FFI). Keyword `unsafe` tidak mematikan borrow checker biasa, melainkan mengizinkan 5 aksi khusus di bawah tanggung jawab langsung programmer. |
+| **2. Safe Abstraction** | Apa perbedaan Safe Abstraction dan Unsafe Implementation? | *Unsafe implementation* adalah operasi berisiko tinggi yang mendereferensi pointer mentah, mengabaikan boundary check, atau memanipulasi memori uninitialized. *Safe abstraction* adalah fungsi atau struct aman yang membungkus blok unsafe tersebut, di mana seluruh invariant (non-null, alignment, bounds check, non-aliasing) diverifikasi secara ketat terlebih dahulu. Contoh: `slice::split_at_mut` memverifikasi `mid <= len` secara aman sebelum menjalankan pointer arithmetic di dalam unsafe. |
+| **3. Macro System** | Bagaimana cara kerja dan manfaat `macro_rules!`? | `macro_rules!` adalah sistem metaprogramming deklaratif berbasis pencocokan pola pohon token (*AST matching*) saat kompilasi. Manfaat utamanya adalah eliminasi duplikasi kode (*boilerplate*), penyediaan antarmuka variadic dinamis, sifat higienis (*hygienic* tidak mencemari variabel lokal), dan zero-runtime overhead. |
+| **4. Konsep FFI & ABI** | Apa itu FFI dan Application Binary Interface (ABI)? | FFI (*Foreign Function Interface*) adalah mekanisme jembatan untuk memanggil fungsi dari/ke bahasa lain. ABI (*Application Binary Interface*) adalah kontrak biner tingkat mesin yang mengatur register pemanggilan fungsi (*calling convention*), tata letak dan padding memori (`#[repr(C)]`), pencegahan name mangling (`#[unsafe(no_mangle)]`), serta isolasi panic (`catch_unwind`) agar tidak merusak runtime bahasa lain. |
+
+Kode lengkap demonstrasi dan rangkaian pengujian untuk Mini Project ini tersedia pada modul [mini_project_14.rs](rust-learning-lab/src/mini_project_14.rs).
 
 ---
 

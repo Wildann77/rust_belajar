@@ -793,11 +793,11 @@ Materi:
 
 ## Task 1 — Closures
 
-- [ ] Closure tanpa capture.
-- [ ] Closure capture immutable.
-- [ ] Closure capture mutable.
-- [ ] `move`.
-- [ ] Tentukan apakah closure menjadi `Fn`, `FnMut`, atau `FnOnce`.
+- [x] Closure tanpa capture.
+- [x] Closure capture immutable.
+- [x] Closure capture mutable.
+- [x] `move`.
+- [x] Tentukan apakah closure menjadi `Fn`, `FnMut`, atau `FnOnce`.
 
 ## Task 2 — Iterator
 
@@ -812,16 +812,16 @@ numbers
     .collect()
 ```
 
-- [ ] `iter()`
-- [ ] `iter_mut()`
-- [ ] `into_iter()`
-- [ ] `map`
-- [ ] `filter`
-- [ ] `find`
-- [ ] `any`
-- [ ] `all`
-- [ ] `fold`
-- [ ] `collect`
+- [x] `iter()`
+- [x] `iter_mut()`
+- [x] `into_iter()`
+- [x] `map`
+- [x] `filter`
+- [x] `find`
+- [x] `any`
+- [x] `all`
+- [x] `fold`
+- [x] `collect`
 
 ## Mini Project Fase 9 — Statistics Processor
 
@@ -832,19 +832,19 @@ Input:
 ```
 
 Output:
-- [ ] angka genap
-- [ ] angka > threshold
-- [ ] square
-- [ ] sum
-- [ ] average
-- [ ] maximum
-- [ ] minimum
+- [x] angka genap
+- [x] angka > threshold
+- [x] square
+- [x] sum
+- [x] average
+- [x] maximum
+- [x] minimum
 
 ### Lulus fase
 
-- [ ] Bisa membedakan `iter()`, `iter_mut()`, `into_iter()`.
-- [ ] Bisa menjelaskan laziness iterator.
-- [ ] Bisa menjelaskan Fn/FnMut/FnOnce dengan contoh sendiri.
+- [x] Bisa membedakan `iter()`, `iter_mut()`, `into_iter()`.
+- [x] Bisa menjelaskan laziness iterator.
+- [x] Bisa menjelaskan Fn/FnMut/FnOnce dengan contoh sendiri.
 
 ---
 
@@ -870,50 +870,50 @@ Materi:
 
 ### Box
 
-- [ ] Heap allocation.
-- [ ] Recursive type.
-- [ ] Dereference `Box`.
+- [x] Heap allocation.
+- [x] Recursive type.
+- [x] Dereference `Box`.
 
 ### Rc
 
-- [ ] Shared ownership single-thread.
-- [ ] `Rc::clone`.
-- [ ] `strong_count`.
+- [x] Shared ownership single-thread.
+- [x] `Rc::clone`.
+- [x] `strong_count`.
 
 ### RefCell
 
-- [ ] `borrow`.
-- [ ] `borrow_mut`.
-- [ ] Sengaja buat double mutable borrow.
-- [ ] Amati runtime panic.
+- [x] `borrow`.
+- [x] `borrow_mut`.
+- [x] Sengaja buat double mutable borrow.
+- [x] Amati runtime panic.
 
 ### Arc
 
-- [ ] Clone `Arc`.
-- [ ] Share value antar-thread.
+- [x] Clone `Arc`.
+- [x] Share value antar-thread.
 
 ### Mutex / RwLock
 
-- [ ] Shared mutable state.
-- [ ] Lock.
-- [ ] Guard.
-- [ ] Scope lock.
-- [ ] Read lock vs write lock.
+- [x] Shared mutable state.
+- [x] Lock.
+- [x] Guard.
+- [x] Scope lock.
+- [x] Read lock vs write lock.
 
 ## Mini Project Fase 10 — Shared Counter
 
 Buat:
-- [ ] `Arc<Mutex<i32>>`
-- [ ] 10 worker tasks/threads
-- [ ] Setiap worker increment counter
-- [ ] Join semuanya
-- [ ] Pastikan hasil deterministic
+- [x] `Arc<Mutex<i32>>`
+- [x] 10 worker tasks/threads
+- [x] Setiap worker increment counter
+- [x] Join semuanya
+- [x] Pastikan hasil deterministic
 
 ### Lulus fase
 
-- [ ] Bisa menjelaskan perbedaan `Rc` vs `Arc`.
-- [ ] Bisa menjelaskan `RefCell` vs `Mutex`.
-- [ ] Bisa menjelaskan kapan memilih `Mutex` dan `RwLock`.
+- [x] Bisa menjelaskan perbedaan `Rc` vs `Arc`.
+- [x] Bisa menjelaskan `RefCell` vs `Mutex`.
+- [x] Bisa menjelaskan kapan memilih `Mutex` dan `RwLock`.
 
 ---
 
@@ -937,25 +937,25 @@ Materi:
 
 ## Task 1 — Threads
 
-- [ ] Spawn 2 thread.
-- [ ] Spawn banyak thread.
-- [ ] Return value dari thread.
-- [ ] `join()`.
+- [x] Spawn 2 thread.
+- [x] Spawn banyak thread.
+- [x] Return value dari thread.
+- [x] `join()`.
 
 ## Task 2 — Channels
 
-- [ ] `mpsc::channel`.
-- [ ] Clone transmitter.
-- [ ] Multi producer.
-- [ ] Single consumer.
-- [ ] `drop(tx)` untuk menutup channel.
+- [x] `mpsc::channel`.
+- [x] Clone transmitter.
+- [x] Multi producer.
+- [x] Single consumer.
+- [x] `drop(tx)` untuk menutup channel.
 
 ## Task 3 — Send & Sync
 
-- [ ] Cari tipe yang `Send`.
-- [ ] Cari tipe yang tidak `Send`.
-- [ ] Cari tipe yang `Sync`.
-- [ ] Pahami hubungan `&T` dan `Send`.
+- [x] Cari tipe yang `Send`.
+- [x] Cari tipe yang tidak `Send`.
+- [x] Cari tipe yang `Sync`.
+- [x] Pahami hubungan `&T` dan `Send`.
 
 ## Mini Project Fase 11 — Worker Pool CLI
 
@@ -976,17 +976,17 @@ Main
 ```
 
 Fitur:
-- [ ] Kirim job.
-- [ ] Worker memproses job.
-- [ ] Worker mengirim hasil.
-- [ ] Main mengumpulkan hasil.
-- [ ] Graceful completion.
+- [x] Kirim job.
+- [x] Worker memproses job.
+- [x] Worker mengirim hasil.
+- [x] Main mengumpulkan hasil.
+- [x] Graceful completion.
 
 ### Lulus fase
 
-- [ ] Bisa membedakan concurrency dan parallelism.
-- [ ] Bisa menjelaskan `Send` dan `Sync`.
-- [ ] Bisa membuat worker pool sederhana.
+- [x] Bisa membedakan concurrency dan parallelism.
+- [x] Bisa menjelaskan `Send` dan `Sync`.
+- [x] Bisa membuat worker pool sederhana.
 
 ---
 
@@ -1015,11 +1015,11 @@ Materi:
 
 ## Task 1 — Future Mental Model
 
-- [ ] Jelaskan mengapa Future bersifat lazy.
-- [ ] Pahami `poll`.
-- [ ] Pahami executor.
-- [ ] Pahami `Waker`.
-- [ ] Pahami secara konseptual mengapa `Pin` ada.
+- [x] Jelaskan mengapa Future bersifat lazy.
+- [x] Pahami `poll`.
+- [x] Pahami executor.
+- [x] Pahami `Waker`.
+- [x] Pahami secara konseptual mengapa `Pin` ada.
 
 ## Task 2 — Tokio
 
@@ -1032,16 +1032,16 @@ cd tokio-lab
 cargo add tokio --features full
 ```
 
-- [ ] `#[tokio::main]`
-- [ ] `async fn`
-- [ ] `.await`
-- [ ] `tokio::spawn`
-- [ ] `JoinHandle`
-- [ ] `tokio::join!`
-- [ ] `tokio::select!`
-- [ ] `tokio::time::sleep`
-- [ ] `timeout`
-- [ ] `spawn_blocking`
+- [x] `#[tokio::main]`
+- [x] `async fn`
+- [x] `.await`
+- [x] `tokio::spawn`
+- [x] `JoinHandle`
+- [x] `tokio::join!`
+- [x] `tokio::select!`
+- [x] `tokio::time::sleep`
+- [x] `timeout`
+- [x] `spawn_blocking`
 
 ## Task 3 — Concurrent Tasks
 
@@ -1055,22 +1055,22 @@ Task 10
 ```
 
 Masing-masing:
-- [ ] sleep berbeda.
-- [ ] menghasilkan result.
-- [ ] di-join oleh main.
+- [x] sleep berbeda.
+- [x] menghasilkan result.
+- [x] di-join oleh main.
 
 ## Task 4 — Timeout
 
-- [ ] Request simulasi 100ms.
-- [ ] Timeout 50ms.
-- [ ] Timeout 500ms.
-- [ ] Handle keduanya menggunakan `Result`.
+- [x] Request simulasi 100ms.
+- [x] Timeout 50ms.
+- [x] Timeout 500ms.
+- [x] Handle keduanya menggunakan `Result`.
 
 ## Task 5 — Cancellation
 
-- [ ] Buat worker background.
-- [ ] Tambahkan signal shutdown.
-- [ ] Hentikan worker secara graceful.
+- [x] Buat worker background.
+- [x] Tambahkan signal shutdown.
+- [x] Hentikan worker secara graceful.
 
 ## Mini Project Fase 12 — Async Job Processor
 
@@ -1088,11 +1088,11 @@ Result Channel
 
 ### Lulus fase
 
-- [ ] Bisa menjelaskan `Future`.
-- [ ] Bisa menjelaskan perbedaan OS thread vs Tokio task.
-- [ ] Bisa menggunakan `spawn`.
-- [ ] Bisa menggunakan `select!`.
-- [ ] Bisa menjelaskan kapan harus menggunakan `spawn_blocking`.
+- [x] Bisa menjelaskan `Future`.
+- [x] Bisa menjelaskan perbedaan OS thread vs Tokio task.
+- [x] Bisa menggunakan `spawn`.
+- [x] Bisa menggunakan `select!`.
+- [x] Bisa menjelaskan kapan harus menggunakan `spawn_blocking`.
 
 ---
 
@@ -1115,16 +1115,16 @@ Materi:
 
 ## Task
 
-- [ ] Buat unit test.
-- [ ] Buat integration test di `tests/`.
-- [ ] Buat documentation test.
-- [ ] Buat async test dengan `#[tokio::test]`.
-- [ ] `assert_eq!`
-- [ ] `assert_ne!`
-- [ ] `assert!`
-- [ ] Test success case.
-- [ ] Test error case.
-- [ ] Test edge case.
+- [x] Buat unit test.
+- [x] Buat integration test di `tests/`.
+- [x] Buat documentation test.
+- [x] Buat async test dengan `#[tokio::test]`.
+- [x] `assert_eq!`
+- [x] `assert_ne!`
+- [x] `assert!`
+- [x] Test success case.
+- [x] Test error case.
+- [x] Test edge case.
 
 ## Quality commands
 
@@ -1138,11 +1138,11 @@ cargo build --release
 ## Mini Project Fase 13 — Test Suite Task Manager
 
 Target:
-- [ ] CRUD tests.
-- [ ] Error tests.
-- [ ] Concurrency tests.
-- [ ] Async tests.
-- [ ] Integration tests.
+- [x] CRUD tests.
+- [x] Error tests.
+- [x] Concurrency tests.
+- [x] Async tests.
+- [x] Integration tests.
 
 ### Lulus fase
 
@@ -1176,26 +1176,26 @@ Materi:
 
 ## Task 1 — Unsafe
 
-- [ ] Buat raw pointer `*const T`.
-- [ ] Buat raw pointer `*mut T`.
-- [ ] Dereference dalam `unsafe`.
-- [ ] Jelaskan invariant yang harus dijaga programmer.
+- [x] Buat raw pointer `*const T`.
+- [x] Buat raw pointer `*mut T`.
+- [x] Dereference dalam `unsafe`.
+- [x] Jelaskan invariant yang harus dijaga programmer.
 
 ## Task 2 — FFI
 
-- [ ] Pelajari konsep ABI.
-- [ ] Pelajari `extern "C"`.
-- [ ] Pelajari pemanggilan function C secara konseptual.
-- [ ] Identifikasi boundary safe/unsafe.
+- [x] Pelajari konsep ABI.
+- [x] Pelajari `extern "C"`.
+- [x] Pelajari pemanggilan function C secara konseptual.
+- [x] Identifikasi boundary safe/unsafe.
 
 ## Task 3 — Macros
 
-- [ ] `macro_rules!`
-- [ ] Pattern matching macro.
-- [ ] Repetition `$(...)*`.
-- [ ] Expression fragment.
-- [ ] Item fragment.
-- [ ] Buat macro sederhana.
+- [x] `macro_rules!`
+- [x] Pattern matching macro.
+- [x] Repetition `$(...)*`.
+- [x] Expression fragment.
+- [x] Item fragment.
+- [x] Buat macro sederhana.
 
 ## Mini Project Fase 14 — Utility Macro
 
@@ -1213,10 +1213,10 @@ create_vec!(1, 2, 3, 4, 5);
 
 ### Lulus fase
 
-- [ ] Bisa menjelaskan mengapa `unsafe` ada.
-- [ ] Bisa membedakan safe abstraction dan unsafe implementation.
-- [ ] Bisa membuat `macro_rules!` sederhana.
-- [ ] Bisa menjelaskan apa itu FFI.
+- [x] Bisa menjelaskan mengapa `unsafe` ada.
+- [x] Bisa membedakan safe abstraction dan unsafe implementation.
+- [x] Bisa membuat `macro_rules!` sederhana.
+- [x] Bisa menjelaskan apa itu FFI.
 
 > Catatan: Fase ini tidak berarti semua project harus menggunakan `unsafe`. Tujuannya adalah memahami boundary dan trade-off.
 
