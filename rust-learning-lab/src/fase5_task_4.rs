@@ -64,11 +64,21 @@ pub fn run() {
     }
 
     println!("\n3. Manfaat Arsitektural Cargo Workspace:");
-    println!("   - Single Cargo.lock: Seluruh sub-crate berbagi versi dependensi yang sama persis.");
-    println!("   - Shared target/ Directory: Output kompilasi hanya dibuat sekali untuk semua crate.");
-    println!("   - Workspace Inheritance: Versi package & dependencies dikelola terpusat via `[workspace.dependencies]`.");
-    println!("   - Modular Boundary: Pemisahan tegas domain logic, adapter, dan application runner.");
-    println!("   - Unified Commands: `cargo check`, `cargo test`, `cargo fmt`, `cargo clippy` berjalan serentak.");
+    println!(
+        "   - Single Cargo.lock: Seluruh sub-crate berbagi versi dependensi yang sama persis."
+    );
+    println!(
+        "   - Shared target/ Directory: Output kompilasi hanya dibuat sekali untuk semua crate."
+    );
+    println!(
+        "   - Workspace Inheritance: Versi package & dependencies dikelola terpusat via `[workspace.dependencies]`."
+    );
+    println!(
+        "   - Modular Boundary: Pemisahan tegas domain logic, adapter, dan application runner."
+    );
+    println!(
+        "   - Unified Commands: `cargo check`, `cargo test`, `cargo fmt`, `cargo clippy` berjalan serentak."
+    );
 }
 
 #[cfg(test)]

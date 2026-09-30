@@ -4,7 +4,7 @@
 // File di direktori `tests/` dikompilasi oleh Cargo sebagai crate independen
 // yang mengonsumsi library crate `rust_learning_lab` melalui API publiknya.
 
-use rust_learning_lab::{authenticate, Claims, Priority, Task, TaskService, TaskStatus};
+use rust_learning_lab::{Claims, Priority, Task, TaskService, TaskStatus, authenticate};
 
 #[test]
 fn test_models_public_api() {
@@ -71,9 +71,11 @@ fn test_task_service_workflow_and_reexports() {
     // 3. Dev biasa mencoba memajukan task Critical -> HARUS DITOLAK
     let dev_advance_res = service.advance_task(t2_id, &dev_claims);
     assert!(dev_advance_res.is_err());
-    assert!(dev_advance_res
-        .unwrap_err()
-        .contains("Hanya admin yang berhak"));
+    assert!(
+        dev_advance_res
+            .unwrap_err()
+            .contains("Hanya admin yang berhak")
+    );
 
     // 4. Admin memajukan task Critical -> HARUS SUKSES
     let admin_advance_res = service.advance_task(t2_id, &admin_claims);

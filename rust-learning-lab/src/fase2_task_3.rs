@@ -46,8 +46,12 @@ pub fn run() {
     // let m2 = &mut num; // COMPILE ERROR: error[E0499]: cannot borrow `num` as mutable more than once at a time
     // *m1 += 1;
     // *m2 += 2;
-    println!("   -> Error E0502: Mencegah data race dan dangling pointer saat data dibaca selagi diubah.");
-    println!("   -> Error E0499: Mencegah race condition ketika dua penulis memodifikasi memori simultan.");
+    println!(
+        "   -> Error E0502: Mencegah data race dan dangling pointer saat data dibaca selagi diubah."
+    );
+    println!(
+        "   -> Error E0499: Mencegah race condition ketika dua penulis memodifikasi memori simultan."
+    );
 
     // ------------------------------------------------------------------------
     // 4 & 5. Kapan Borrow Selesai & Eksperimen NLL (Non-Lexical Lifetimes)

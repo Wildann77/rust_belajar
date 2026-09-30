@@ -41,7 +41,10 @@ impl Summary for NewsArticle {
 
     /// Override kustom: Menyajikan headline, penulis, dan lokasi artikel.
     fn summarize(&self) -> String {
-        format!("{}, oleh {} ({})", self.headline, self.author, self.location)
+        format!(
+            "{}, oleh {} ({})",
+            self.headline, self.author, self.location
+        )
     }
 }
 
@@ -103,7 +106,11 @@ pub fn notify<T: Summary>(item: &T) -> String {
 /// Fungsi generic dengan Multiple Trait Bounds: `<T: Summary + Display>`.
 /// Menuntut tipe `T` harus mengimplementasikan trait `Summary` DAN `Display`.
 pub fn notify_verbose<T: Summary + Display>(item: &T) -> String {
-    format!("Notifikasi Lengkap: {}\n   -> Display: {}", item.summarize(), item)
+    format!(
+        "Notifikasi Lengkap: {}\n   -> Display: {}",
+        item.summarize(),
+        item
+    )
 }
 
 /// Fungsi generic menggunakan `where` clause untuk kerapian deklarasi bounds.
@@ -133,7 +140,8 @@ pub fn run() {
         headline: "Rust 2024 Edition Resmi Dirilis".to_string(),
         location: "San Francisco".to_string(),
         author: "Tech Wire".to_string(),
-        content: "Edisi terbaru menghadirkan peningkatan performa kompilasi dan sintaks modern.".to_string(),
+        content: "Edisi terbaru menghadirkan peningkatan performa kompilasi dan sintaks modern."
+            .to_string(),
     };
 
     let tweet = Tweet {
@@ -150,9 +158,18 @@ pub fn run() {
 
     // 2. Evaluasi Default vs Override Implementation
     println!("\n1. Eksekusi Trait Method:");
-    println!("   - NewsArticle (Overridden summarize) : {}", article.summarize());
-    println!("   - Tweet (Default summarize)           : {}", tweet.summarize());
-    println!("   - CommunityNotice (Full Default)     : {}", notice.summarize());
+    println!(
+        "   - NewsArticle (Overridden summarize) : {}",
+        article.summarize()
+    );
+    println!(
+        "   - Tweet (Default summarize)           : {}",
+        tweet.summarize()
+    );
+    println!(
+        "   - CommunityNotice (Full Default)     : {}",
+        notice.summarize()
+    );
 
     // 3. Demonstrasi Trait Bound pada Fungsi Generic
     println!("\n2. Pemanggilan Fungsi dengan Trait Bounds:");
@@ -214,7 +231,10 @@ mod tests {
         };
 
         assert_eq!(notice.summarize_author(), "Kontributor Anonim");
-        assert_eq!(notice.summarize(), "(Baca selengkapnya dari Kontributor Anonim...)");
+        assert_eq!(
+            notice.summarize(),
+            "(Baca selengkapnya dari Kontributor Anonim...)"
+        );
     }
 
     #[test]

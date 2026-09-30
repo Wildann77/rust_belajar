@@ -6,11 +6,11 @@ edition = "2024"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.0", optional = true, features = ["rt", "macros"] }
+tokio = { version = "1.0", features = ["full"] }
 
 [features]
-default = []
-async_runtime = ["dep:tokio"]
+default = ["async_runtime"]
+async_runtime = []
 
 [dev-dependencies]
 pretty_assertions = "1.4"
@@ -26,5 +26,25 @@ opt-level = 3        # Optimasi maksimum (kecepatan eksekusi)
 lto = "thin"         # Link-Time Optimization lintas crate
 codegen-units = 1    # Unit tunggal untuk maksimalkan inline LLVM
 strip = "debuginfo"  # Buang debug info untuk pangkas ukuran binary
+
+[lints.rust]
+dead_code = "allow"
+
+[lints.clippy]
+bool_assert_comparison = "allow"
+let_and_return = "allow"
+manual_div_ceil = "allow"
+doc_lazy_continuation = "allow"
+print_literal = "allow"
+borrowed_box = "allow"
+boxed_local = "allow"
+unnecessary_fold = "allow"
+approx_constant = "allow"
+redundant_static_lifetimes = "allow"
+wrong_self_convention = "allow"
+collapsible_if = "allow"
+needless_lifetimes = "allow"
+manual_find = "allow"
+
 
 

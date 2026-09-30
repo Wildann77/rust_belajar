@@ -22,7 +22,11 @@ pub fn run() {
     // ------------------------------------------------------------------------
     println!("\n2. Iterasi bytes() (Total {byte_length} byte):");
     for (idx, b) in text.bytes().enumerate() {
-        let ch_repr = if b.is_ascii() { format!("{:?}", b as char) } else { String::from("non-ASCII") };
+        let ch_repr = if b.is_ascii() {
+            format!("{:?}", b as char)
+        } else {
+            String::from("non-ASCII")
+        };
         println!("   byte [{idx}]: {b:3} | hex: 0x{b:02X} | {ch_repr}");
     }
 
@@ -31,16 +35,19 @@ pub fn run() {
     // ------------------------------------------------------------------------
     println!("\n3. Iterasi chars() (Total {char_count} char):");
     for (idx, c) in text.chars().enumerate() {
-        println!("   char [{idx}]: '{c}' (memakan {} byte UTF-8)", c.len_utf8());
+        println!(
+            "   char [{idx}]: '{c}' (memakan {} byte UTF-8)",
+            c.len_utf8()
+        );
     }
 
     // ------------------------------------------------------------------------
     // 4. Slicing pada Boundary Valid
     // ------------------------------------------------------------------------
     println!("\n4. Slicing Boundary Valid:");
-    let slice_ascii = &text[0..4];  // "Rust" (byte 0..4)
-    let slice_space = &text[0..5];  // "Rust " (byte 0..5)
-    let slice_emoji = &text[5..9];  // "🦀" (byte 5..9 persis 4 byte)
+    let slice_ascii = &text[0..4]; // "Rust" (byte 0..4)
+    let slice_space = &text[0..5]; // "Rust " (byte 0..5)
+    let slice_emoji = &text[5..9]; // "🦀" (byte 5..9 persis 4 byte)
     println!("   Slice [0..4] (ASCII) : \"{slice_ascii}\"");
     println!("   Slice [0..5] (Spasi) : \"{slice_space}\"");
     println!("   Slice [5..9] (Emoji) : \"{slice_emoji}\"");
@@ -52,12 +59,14 @@ pub fn run() {
     // Jika kita langsung menulis: let bad = &text[0..6];
     // Rust akan RUNTIME PANIC:
     // "byte index 6 is not a char boundary; it is inside '🦀' (bytes 5..9) of `Rust 🦀`"
-    
+
     // Penanganan aman via method .get(range) -> Option<&str>:
     let invalid_range = 0..6; // Memotong emoji 🦀 di byte pertama saja
     match text.get(invalid_range.clone()) {
         Some(valid_slice) => println!("   Slice {:?}: \"{}\"", invalid_range, valid_slice),
-        None => println!("   text.get(0..6) mengembalikan None karena index 6 berada di tengah-tengah byte '🦀'!"),
+        None => println!(
+            "   text.get(0..6) mengembalikan None karena index 6 berada di tengah-tengah byte '🦀'!"
+        ),
     }
 
     // Tangkap panic secara terkendali untuk membuktikan behavior runtime panic:

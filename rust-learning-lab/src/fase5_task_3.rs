@@ -91,9 +91,15 @@ pub fn run() {
     println!("   Tujuan          : {}", current.purpose);
 
     println!("\n2. Konsep Inti 5 Parameter Profil Cargo:");
-    println!("   - profile.dev    : Profil bawaan untuk `cargo build` & `cargo test` (fokus kecepatan kompilasi).");
-    println!("   - profile.release: Profil bawaan untuk `cargo build --release` (fokus kecepatan runtime).");
-    println!("   - opt-level      : 0 (tanpa optimasi) s/d 3 (optimasi maksimum), 's'/'z' (ukuran binary).");
+    println!(
+        "   - profile.dev    : Profil bawaan untuk `cargo build` & `cargo test` (fokus kecepatan kompilasi)."
+    );
+    println!(
+        "   - profile.release: Profil bawaan untuk `cargo build --release` (fokus kecepatan runtime)."
+    );
+    println!(
+        "   - opt-level      : 0 (tanpa optimasi) s/d 3 (optimasi maksimum), 's'/'z' (ukuran binary)."
+    );
     println!("   - LTO (Link-Time): Optimasi lintas-crate oleh linker ('off', 'thin', 'fat').");
     println!("   - debug / strip  : Mengatur keberadaan symbol debug di binary executable.");
 
@@ -102,12 +108,23 @@ pub fn run() {
     let (num, steps) = compute_collatz_max_steps(200_000);
     let duration = start.elapsed();
 
-    println!("   Angka {} menghasilkan rantai terpanjang: {} langkah", num, steps);
-    println!("   Waktu komputasi [{}]: {:.2?}", active_profile_name(), duration);
+    println!(
+        "   Angka {} menghasilkan rantai terpanjang: {} langkah",
+        num, steps
+    );
+    println!(
+        "   Waktu komputasi [{}]: {:.2?}",
+        active_profile_name(),
+        duration
+    );
     if cfg!(debug_assertions) {
-        println!("   [Catatan] Jalankan `cargo run --release` untuk merasakan akselerasi opt-level=3 + LTO!");
+        println!(
+            "   [Catatan] Jalankan `cargo run --release` untuk merasakan akselerasi opt-level=3 + LTO!"
+        );
     } else {
-        println!("   [Catatan] Mode release aktif: optimasi LLVM memaksimalkan register & inlining.");
+        println!(
+            "   [Catatan] Mode release aktif: optimasi LLVM memaksimalkan register & inlining."
+        );
     }
 }
 

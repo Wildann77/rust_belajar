@@ -152,19 +152,37 @@ pub fn run() {
 
     // 6: and_then combinator (chaining & flattening)
     println!("\n5. Rantai Pengecekan Bersarang via `.and_then()` (Flat Map):");
-    println!("   - ID 1 (Lengkap)     postal_code: {:?}", get_user_postal_code(repo.find_by_id(1)));
-    println!("   - ID 2 (Tanpa Pos)   postal_code: {:?}", get_user_postal_code(repo.find_by_id(2)));
-    println!("   - ID 3 (Tanpa Alamat)postal_code: {:?}", get_user_postal_code(repo.find_by_id(3)));
-    println!("   - ID 99 (None User)  postal_code: {:?}", get_user_postal_code(repo.find_by_id(99)));
+    println!(
+        "   - ID 1 (Lengkap)     postal_code: {:?}",
+        get_user_postal_code(repo.find_by_id(1))
+    );
+    println!(
+        "   - ID 2 (Tanpa Pos)   postal_code: {:?}",
+        get_user_postal_code(repo.find_by_id(2))
+    );
+    println!(
+        "   - ID 3 (Tanpa Alamat)postal_code: {:?}",
+        get_user_postal_code(repo.find_by_id(3))
+    );
+    println!(
+        "   - ID 99 (None User)  postal_code: {:?}",
+        get_user_postal_code(repo.find_by_id(99))
+    );
 
     // 7: unwrap_or fallback aman
     println!("\n6. Fallback Aman via `.unwrap_or()` (Anti-Crash):");
     let fallback = "guest@system.local";
     if let Some(u) = repo.find_by_id(2) {
-        println!("   - Bob email     -> {}", get_email_or_default(u, fallback));
+        println!(
+            "   - Bob email     -> {}",
+            get_email_or_default(u, fallback)
+        );
     }
     if let Some(u) = repo.find_by_id(3) {
-        println!("   - Charlie email -> {}", get_email_or_default(u, fallback));
+        println!(
+            "   - Charlie email -> {}",
+            get_email_or_default(u, fallback)
+        );
     }
 }
 
@@ -186,7 +204,10 @@ mod tests {
         let u99 = repo.find_by_id(99);
 
         assert_eq!(format_user_greeting(u1), "Halo, alice! (ID: 1)");
-        assert_eq!(format_user_greeting(u99), "User tidak ditemukan dalam sistem!");
+        assert_eq!(
+            format_user_greeting(u99),
+            "User tidak ditemukan dalam sistem!"
+        );
     }
 
     #[test]
@@ -205,7 +226,10 @@ mod tests {
         let alice = repo.find_by_id(1).unwrap();
         let charlie = repo.find_by_id(3).unwrap();
 
-        assert_eq!(get_uppercase_email(alice), Some("ALICE@EXAMPLE.COM".to_string()));
+        assert_eq!(
+            get_uppercase_email(alice),
+            Some("ALICE@EXAMPLE.COM".to_string())
+        );
         assert_eq!(get_uppercase_email(charlie), None);
     }
 
@@ -214,7 +238,10 @@ mod tests {
         let repo = UserRepository::new();
 
         // Kasus 1: Semua level Some
-        assert_eq!(get_user_postal_code(repo.find_by_id(1)), Some("10110".to_string()));
+        assert_eq!(
+            get_user_postal_code(repo.find_by_id(1)),
+            Some("10110".to_string())
+        );
 
         // Kasus 2: User ada, Alamat ada, postal_code None
         assert_eq!(get_user_postal_code(repo.find_by_id(2)), None);
@@ -232,7 +259,13 @@ mod tests {
         let alice = repo.find_by_id(1).unwrap();
         let charlie = repo.find_by_id(3).unwrap();
 
-        assert_eq!(get_email_or_default(alice, "fallback@mail.com"), "alice@example.com");
-        assert_eq!(get_email_or_default(charlie, "fallback@mail.com"), "fallback@mail.com");
+        assert_eq!(
+            get_email_or_default(alice, "fallback@mail.com"),
+            "alice@example.com"
+        );
+        assert_eq!(
+            get_email_or_default(charlie, "fallback@mail.com"),
+            "fallback@mail.com"
+        );
     }
 }

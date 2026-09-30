@@ -34,7 +34,11 @@ pub struct User {
 
 impl Display for User {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "User [ID: {}, Username: '{}', Email: '{}']", self.id, self.username, self.email)
+        write!(
+            f,
+            "User [ID: {}, Username: '{}', Email: '{}']",
+            self.id, self.username, self.email
+        )
     }
 }
 
@@ -47,7 +51,11 @@ pub struct Product {
 
 impl Display for Product {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Product [ID: {}, Name: '{}', Price: Rp{:.2}]", self.id, self.name, self.price)
+        write!(
+            f,
+            "Product [ID: {}, Name: '{}', Price: Rp{:.2}]",
+            self.id, self.name, self.price
+        )
     }
 }
 
@@ -78,7 +86,9 @@ pub struct InMemoryUserRepository {
 
 impl InMemoryUserRepository {
     pub fn new() -> Self {
-        Self { storage: HashMap::new() }
+        Self {
+            storage: HashMap::new(),
+        }
     }
 
     pub fn insert(&mut self, user: User) {
@@ -111,7 +121,9 @@ pub struct InMemoryProductRepository {
 
 impl InMemoryProductRepository {
     pub fn new() -> Self {
-        Self { storage: HashMap::new() }
+        Self {
+            storage: HashMap::new(),
+        }
     }
 
     pub fn insert(&mut self, product: Product) {
@@ -148,7 +160,9 @@ impl Repository for MockFaultyRepository {
         if id == 0 {
             Err(RepoError::NotFound(0))
         } else {
-            Err(RepoError::ConnectionFailed("Timeout server database mock".to_string()))
+            Err(RepoError::ConnectionFailed(
+                "Timeout server database mock".to_string(),
+            ))
         }
     }
 }
@@ -158,7 +172,7 @@ impl Repository for MockFaultyRepository {
 // ----------------------------------------------------------------------------
 
 /// Mengambil entitas dari sembarang repository dan memformatnya menjadi String.
-/// 
+///
 /// Menggunakan proyeksi `R::Item` dan `R::Error`:
 /// - `R::Item: Display` memastikan item repository bisa dicetak via `{}`.
 pub fn fetch_and_display<R>(repo: &R, id: u64) -> Result<String, R::Error>
@@ -313,4 +327,3 @@ mod tests {
         assert!(matches!(err_conn, RepoError::ConnectionFailed(_)));
     }
 }
-

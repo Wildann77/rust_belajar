@@ -18,7 +18,10 @@ impl fmt::Display for TaskManagerError {
             TaskManagerError::TaskNotFound(id) => write!(f, "Task dengan ID #{id} tidak ditemukan"),
             TaskManagerError::EmptyTitle => write!(f, "Judul task tidak boleh kosong"),
             TaskManagerError::InvalidId(raw) => {
-                write!(f, "ID task '{raw}' tidak valid (harus berupa bilangan bulat positif)")
+                write!(
+                    f,
+                    "ID task '{raw}' tidak valid (harus berupa bilangan bulat positif)"
+                )
             }
         }
     }
@@ -149,17 +152,27 @@ impl TaskManager {
                 Ok(format!("Task #{id} ('{title}') berhasil ditambahkan"))
             }
             "FIND" => {
-                let id_str = parts.next().ok_or(TaskManagerError::InvalidId("".to_string()))?;
+                let id_str = parts
+                    .next()
+                    .ok_or(TaskManagerError::InvalidId("".to_string()))?;
                 let task = self.parse_and_find(id_str)?;
-                Ok(format!("Ditemukan: [#{}] {} ({})", task.id, task.title, task.category))
+                Ok(format!(
+                    "Ditemukan: [#{}] {} ({})",
+                    task.id, task.title, task.category
+                ))
             }
             "DEL" => {
-                let id_str = parts.next().ok_or(TaskManagerError::InvalidId("".to_string()))?;
+                let id_str = parts
+                    .next()
+                    .ok_or(TaskManagerError::InvalidId("".to_string()))?;
                 let parsed_id = id_str
                     .parse::<u32>()
                     .map_err(|_| TaskManagerError::InvalidId(id_str.to_string()))?;
                 let deleted = self.delete_task(parsed_id)?;
-                Ok(format!("Task #{} ('{}') berhasil dihapus", deleted.id, deleted.title))
+                Ok(format!(
+                    "Task #{} ('{}') berhasil dihapus",
+                    deleted.id, deleted.title
+                ))
             }
             _ => Err(TaskManagerError::EmptyTitle),
         }
@@ -186,7 +199,11 @@ pub fn run() {
     );
     let t2 = manager.add_task("Desain Database Schema", "Database", None);
     let t3 = manager.add_task("Buat Unit Test Axum Handlers", "Testing", None);
-    let t4 = manager.add_task("Setup CI/CD Pipeline", "DevOps", Some("GitHub Actions workflow"));
+    let t4 = manager.add_task(
+        "Setup CI/CD Pipeline",
+        "DevOps",
+        Some("GitHub Actions workflow"),
+    );
 
     println!("   [+] Task #{} dibuat", t1.as_ref().unwrap());
     println!("   [+] Task #{} dibuat", t2.as_ref().unwrap());
@@ -228,7 +245,10 @@ pub fn run() {
     // 5. Delete Task
     println!("\n5. Menghapus Task (Delete Task):");
     match manager.delete_task(2) {
-        Ok(deleted) => println!("   [✓] Berhasil menghapus task #{}: '{}'", deleted.id, deleted.title),
+        Ok(deleted) => println!(
+            "   [✓] Berhasil menghapus task #{}: '{}'",
+            deleted.id, deleted.title
+        ),
         Err(e) => println!("   [✗] Gagal menghapus: {e}"),
     }
 
@@ -254,11 +274,21 @@ pub fn run() {
 
     // 8. Ringkasan Kriteria Lulus Fase 6
     println!("\n8. Evaluasi Kriteria Lulus Fase 6:");
-    println!("   [x] Kapan Option vs Result: Option untuk ketiadaan nilai wajar; Result untuk operasi yang bisa gagal.");
-    println!("   [x] Pemakaian Operator ?: Propagasi error otomatis di parse_and_find dan execute_command.");
-    println!("   [x] Custom Error: TaskManagerError dengan trait Display, Debug, dan std::error::Error.");
-    println!("   [x] HashMap Entry API: Digunakan pada get_category_stats() dengan entry(), and_modify(), or_insert().");
-    println!("   [x] Zero unwrap() pada input: Semua input parsing dipetakan aman via Result & map_err.");
+    println!(
+        "   [x] Kapan Option vs Result: Option untuk ketiadaan nilai wajar; Result untuk operasi yang bisa gagal."
+    );
+    println!(
+        "   [x] Pemakaian Operator ?: Propagasi error otomatis di parse_and_find dan execute_command."
+    );
+    println!(
+        "   [x] Custom Error: TaskManagerError dengan trait Display, Debug, dan std::error::Error."
+    );
+    println!(
+        "   [x] HashMap Entry API: Digunakan pada get_category_stats() dengan entry(), and_modify(), or_insert()."
+    );
+    println!(
+        "   [x] Zero unwrap() pada input: Semua input parsing dipetakan aman via Result & map_err."
+    );
 }
 
 // ----------------------------------------------------------------------------
@@ -272,7 +302,9 @@ mod tests {
     #[test]
     fn test_add_and_list_tasks() {
         let mut manager = TaskManager::new();
-        let id1 = manager.add_task("Task 1", "Work", Some("Detail 1")).unwrap();
+        let id1 = manager
+            .add_task("Task 1", "Work", Some("Detail 1"))
+            .unwrap();
         let id2 = manager.add_task("Task 2", "Personal", None).unwrap();
 
         assert_eq!(id1, 1);
@@ -310,7 +342,10 @@ mod tests {
         assert_eq!(deleted.unwrap().id, id);
 
         // Setelah dihapus, pencarian harus mengembalikan TaskNotFound
-        assert_eq!(manager.find_task(id), Err(TaskManagerError::TaskNotFound(id)));
+        assert_eq!(
+            manager.find_task(id),
+            Err(TaskManagerError::TaskNotFound(id))
+        );
     }
 
     #[test]
@@ -324,7 +359,10 @@ mod tests {
 
         // Input invalid format
         let res_invalid = manager.parse_and_find("abc_xyz");
-        assert_eq!(res_invalid, Err(TaskManagerError::InvalidId("abc_xyz".to_string())));
+        assert_eq!(
+            res_invalid,
+            Err(TaskManagerError::InvalidId("abc_xyz".to_string()))
+        );
 
         // Input non-existent ID
         let res_missing = manager.parse_and_find("9999");

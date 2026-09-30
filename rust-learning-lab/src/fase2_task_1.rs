@@ -21,7 +21,9 @@ pub fn run() {
     //           ^^^^ value borrowed here after move
     // error[E0382]: borrow of moved value: `s1`
     // note: move occurs because `s1` has type `String`, which does not implement the `Copy` trait
-    println!("3 & 4. Variable s1 sudah tidak valid (moved). Compiler cegah double free error (E0382).");
+    println!(
+        "3 & 4. Variable s1 sudah tidak valid (moved). Compiler cegah double free error (E0382)."
+    );
 
     // 5. Perbaiki menggunakan .clone() (Deep copy di Heap)
     let s3 = s2.clone();
@@ -43,7 +45,10 @@ pub fn run() {
     #[allow(clippy::approx_constant)]
     let tuple_copy: (i32, f64, char) = (100, 3.14, '🦀');
     let tuple_clone = tuple_copy; // Tuple primitif juga Copy
-    println!("   Tuple Copy: tuple_copy = {:?}, tuple_clone = {:?}", tuple_copy, tuple_clone);
+    println!(
+        "   Tuple Copy: tuple_copy = {:?}, tuple_clone = {:?}",
+        tuple_copy, tuple_clone
+    );
 }
 
 #[cfg(test)]
@@ -54,7 +59,11 @@ mod tests {
         let cloned = original.clone();
 
         assert_eq!(original, cloned);
-        assert_eq!(original.as_ptr() == cloned.as_ptr(), false, "Buffer heap harus berada di alamat berbeda");
+        assert_eq!(
+            original.as_ptr() == cloned.as_ptr(),
+            false,
+            "Buffer heap harus berada di alamat berbeda"
+        );
     }
 
     #[test]

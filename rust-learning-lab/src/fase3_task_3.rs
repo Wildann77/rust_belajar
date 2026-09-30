@@ -234,7 +234,10 @@ mod tests {
 
     #[test]
     fn test_process_command_quit_and_move() {
-        assert_eq!(process_command(&AppCommand::Quit), "Aplikasi ditutup (Quit).");
+        assert_eq!(
+            process_command(&AppCommand::Quit),
+            "Aplikasi ditutup (Quit)."
+        );
 
         let safe_move = AppCommand::MoveTo(Coordinate { x: 30, y: 10 });
         assert!(process_command(&safe_move).contains("area aman pojok kiri"));
@@ -297,10 +300,7 @@ mod tests {
 
     #[test]
     fn test_while_let_process_queue() {
-        let mut queue = vec![
-            AppCommand::Quit,
-            AppCommand::SetVolume(10),
-        ];
+        let mut queue = vec![AppCommand::Quit, AppCommand::SetVolume(10)];
         let logs = process_queue(&mut queue);
         assert_eq!(logs.len(), 2);
         assert!(queue.is_empty());

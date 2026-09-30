@@ -59,11 +59,7 @@ impl TaskService {
     }
 
     /// Memajukan status task dengan validasi hak akses
-    pub fn advance_task(
-        &mut self,
-        id: u64,
-        claims: &Claims,
-    ) -> Result<TaskStatus, &'static str> {
+    pub fn advance_task(&mut self, id: u64, claims: &Claims) -> Result<TaskStatus, &'static str> {
         let task = self
             .get_task_mut(id)
             .ok_or("Task dengan ID tersebut tidak ditemukan")?;

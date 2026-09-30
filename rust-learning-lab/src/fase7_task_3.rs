@@ -21,7 +21,12 @@ impl Summary for PodcastEpisode {
     }
 
     fn summarize(&self) -> String {
-        format!("Podcast '{}' Ep. #{} ({})", self.show_name, self.episode_number, self.summarize_author())
+        format!(
+            "Podcast '{}' Ep. #{} ({})",
+            self.show_name,
+            self.episode_number,
+            self.summarize_author()
+        )
     }
 }
 
@@ -30,7 +35,7 @@ impl Summary for PodcastEpisode {
 // ----------------------------------------------------------------------------
 
 /// Memproses item yang mengimplementasikan trait `Summary` menggunakan Static Dispatch.
-/// 
+///
 /// Karakteristik:
 /// - Compiler membuat duplikasi fungsi biner spesifik untuk tiap tipe konkret saat kompilasi.
 /// - Tidak ada overhead runtime (Zero-Cost Abstraction).
@@ -45,7 +50,7 @@ pub fn process_static<T: Summary>(item: &T) -> String {
 // ----------------------------------------------------------------------------
 
 /// Memproses item menggunakan Dynamic Dispatch lewat referensi Trait Object (`&dyn Summary`).
-/// 
+///
 /// Karakteristik:
 /// - Menggunakan Fat Pointer (16 bytes di arsitektur 64-bit):
 ///   1. Pointer ke data konkret di memori (8 bytes).
@@ -66,7 +71,7 @@ pub fn process_boxed(item: &Box<dyn Summary>) -> String {
 }
 
 /// Memproses sekumpulan item heterogen di dalam koleksi `Vec<Box<dyn Summary>>`.
-/// 
+///
 /// Karena tipe objek dienkapsulasi dalam pointer `Box<dyn Summary>`, sebuah `Vec`
 /// dapat menampung objek-objek dengan ukuran memori berbeda (NewsArticle, Tweet, PodcastEpisode)
 /// dalam satu koleksi seragam.
@@ -117,11 +122,7 @@ pub fn run() {
 
     // 3. Dynamic Dispatch Heterogeneous Collection (Box<dyn Summary>)
     println!("\n3. Koleksi Heterogen via Vec<Box<dyn Summary>>:");
-    let feed: Vec<Box<dyn Summary>> = vec![
-        Box::new(article),
-        Box::new(tweet),
-        Box::new(podcast),
-    ];
+    let feed: Vec<Box<dyn Summary>> = vec![Box::new(article), Box::new(tweet), Box::new(podcast)];
 
     let summaries = process_heterogeneous_collection(&feed);
     for (idx, summary) in summaries.iter().enumerate() {
@@ -130,11 +131,25 @@ pub fn run() {
 
     // 4. Bedah Memori: Thin Pointer vs Fat Pointer
     println!("\n4. Analisis Memori Fat Pointer vs Thin Pointer:");
-    println!("   - Ukuran referensi konkret &NewsArticle (Thin Pointer) : {} bytes", mem::size_of::<&NewsArticle>());
-    println!("   - Ukuran referensi trait object &dyn Summary (Fat Pointer): {} bytes", mem::size_of::<&dyn Summary>());
-    println!("   - Ukuran Box<NewsArticle> (Heap Thin Pointer)          : {} bytes", mem::size_of::<Box<NewsArticle>>());
-    println!("   - Ukuran Box<dyn Summary> (Heap Fat Pointer)           : {} bytes", mem::size_of::<Box<dyn Summary>>());
-    println!("   -> Fat Pointer berukuran 2x pointer biasa: [Pointer Data (8B)] + [Pointer Vtable (8B)]");
+    println!(
+        "   - Ukuran referensi konkret &NewsArticle (Thin Pointer) : {} bytes",
+        mem::size_of::<&NewsArticle>()
+    );
+    println!(
+        "   - Ukuran referensi trait object &dyn Summary (Fat Pointer): {} bytes",
+        mem::size_of::<&dyn Summary>()
+    );
+    println!(
+        "   - Ukuran Box<NewsArticle> (Heap Thin Pointer)          : {} bytes",
+        mem::size_of::<Box<NewsArticle>>()
+    );
+    println!(
+        "   - Ukuran Box<dyn Summary> (Heap Fat Pointer)           : {} bytes",
+        mem::size_of::<Box<dyn Summary>>()
+    );
+    println!(
+        "   -> Fat Pointer berukuran 2x pointer biasa: [Pointer Data (8B)] + [Pointer Vtable (8B)]"
+    );
 }
 
 // ----------------------------------------------------------------------------

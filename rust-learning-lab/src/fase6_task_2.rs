@@ -116,7 +116,9 @@ pub fn process_payment(account_id: u64, amount_str: &str) -> Result<TransactionR
 
 pub fn run() {
     println!("=== Fase 6 - Task 2: Robust Error Handling — Result<T, E> & Operator ? ===");
-    println!("Konsep Inti: Penanganan kemungkinan gagal secara eksplisit via Ok & Err serta operator ?\n");
+    println!(
+        "Konsep Inti: Penanganan kemungkinan gagal secara eksplisit via Ok & Err serta operator ?\n"
+    );
 
     // 1 & 2: Ok & Err via match
     println!("1. Validasi Input via `match` (Ok vs Err):");
@@ -130,7 +132,10 @@ pub fn run() {
         Ok(receipt) => {
             println!(
                 "   [✓] Transaksi Berhasil! ID: {}, Akun: {}, Debet: Rp{:.2}, Sisa: Rp{:.2}",
-                receipt.transaction_id, receipt.account_id, receipt.amount, receipt.remaining_balance
+                receipt.transaction_id,
+                receipt.account_id,
+                receipt.amount,
+                receipt.remaining_balance
             );
         }
         Err(e) => println!("   [✗] Transaksi Gagal: {}", e),
@@ -206,10 +211,7 @@ mod tests {
     #[test]
     fn test_error_propagation_account_not_found() {
         let res = process_payment(888, "100.0");
-        assert_eq!(
-            res,
-            Err("Akun dengan ID 888 tidak ditemukan".to_string())
-        );
+        assert_eq!(res, Err("Akun dengan ID 888 tidak ditemukan".to_string()));
     }
 
     #[test]

@@ -51,9 +51,13 @@ pub enum RepositoryError {
 impl Display for RepositoryError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            RepositoryError::NotFound(msg) => write!(f, "[Error 404] Entitas tidak ditemukan: {msg}"),
+            RepositoryError::NotFound(msg) => {
+                write!(f, "[Error 404] Entitas tidak ditemukan: {msg}")
+            }
             RepositoryError::Duplicate(msg) => write!(f, "[Error 409] Duplikasi entitas: {msg}"),
-            RepositoryError::StorageFailure(msg) => write!(f, "[Error 500] Kegagalan storage: {msg}"),
+            RepositoryError::StorageFailure(msg) => {
+                write!(f, "[Error 500] Kegagalan storage: {msg}")
+            }
         }
     }
 }
@@ -65,7 +69,7 @@ impl std::error::Error for RepositoryError {}
 // ----------------------------------------------------------------------------
 
 /// Trait `Repository` mengabstraksikan operasi persistence data.
-/// 
+///
 /// Menggunakan Associated Types (`Item`, `Id`, `Error`) untuk mengunci relasi
 /// 1-ke-1 antara implementasi storage dengan model data dan tipe error-nya.
 pub trait Repository {
@@ -89,7 +93,9 @@ pub struct InMemoryAccountRepository {
 
 impl InMemoryAccountRepository {
     pub fn new() -> Self {
-        Self { data: HashMap::new() }
+        Self {
+            data: HashMap::new(),
+        }
     }
 
     pub fn find_or_err(&self, id: &AccountId) -> Result<Account, RepositoryError> {
@@ -111,7 +117,10 @@ impl Repository for InMemoryAccountRepository {
 
     fn save(&mut self, item: Self::Item) -> Result<(), Self::Error> {
         if self.data.contains_key(&item.id) {
-            return Err(RepositoryError::Duplicate(format!("Akun dengan ID {} sudah ada", item.id)));
+            return Err(RepositoryError::Duplicate(format!(
+                "Akun dengan ID {} sudah ada",
+                item.id
+            )));
         }
         self.data.insert(item.id, item);
         Ok(())
@@ -120,7 +129,6 @@ impl Repository for InMemoryAccountRepository {
     fn find_by_id(&self, id: &Self::Id) -> Result<Option<Self::Item>, Self::Error> {
         Ok(self.data.get(id).cloned())
     }
-
 
     fn delete(&mut self, id: &Self::Id) -> Result<bool, Self::Error> {
         Ok(self.data.remove(id).is_some())
@@ -174,7 +182,9 @@ impl Repository for MockAccountRepository {
 
     fn save(&mut self, item: Self::Item) -> Result<(), Self::Error> {
         if self.should_fail_on_save {
-            return Err(RepositoryError::StorageFailure(self.failure_message.clone()));
+            return Err(RepositoryError::StorageFailure(
+                self.failure_message.clone(),
+            ));
         }
         self.accounts.insert(item.id, item);
         Ok(())
@@ -238,7 +248,7 @@ pub fn run() {
     // 1. Demonstrasi InMemoryAccountRepository
     println!("\n1. Mengoperasikan InMemoryAccountRepository:");
     let mut in_memory_repo = InMemoryAccountRepository::new();
-    
+
     let acc1 = Account {
         id: AccountId(101),
         holder: "Ahmad Dahlan".to_string(),
@@ -323,10 +333,16 @@ pub fn run() {
 
     // 5. Evaluasi Kriteria Lulus Fase 7
     println!("\n5. Evaluasi Kriteria Lulus Fase 7:");
-    println!("   [x] Generic vs Trait: Generics adalah parameter tipe abstrak; Trait adalah kontrak antarmuka.");
-    println!("   [x] Static vs Dynamic: Static = Monomorphized (Zero-Cost); Dynamic = vtable fat pointer.");
+    println!(
+        "   [x] Generic vs Trait: Generics adalah parameter tipe abstrak; Trait adalah kontrak antarmuka."
+    );
+    println!(
+        "   [x] Static vs Dynamic: Static = Monomorphized (Zero-Cost); Dynamic = vtable fat pointer."
+    );
     println!("   [x] Associated Types: Repository::Item, Id, & Error terikat 1-to-1 pada struct.");
-    println!("   [x] Orphan Rule & Newtype: AccountId tuple struct memberikan type safety dan enkapsulasi.");
+    println!(
+        "   [x] Orphan Rule & Newtype: AccountId tuple struct memberikan type safety dan enkapsulasi."
+    );
 }
 
 // ----------------------------------------------------------------------------

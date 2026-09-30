@@ -182,13 +182,18 @@ pub fn drain_task_pipeline(pipeline: &mut Vec<Task>) -> Vec<String> {
 // ==========================================
 // Runner Function
 // ==========================================
-pub fn run() {                      
+pub fn run() {
     println!("=== Mini Project Fase 3: Task Domain Model ===");
 
     // 1. Constructor Demo
     let mut task1 = Task::new(101, "Setup Database Postgres", Priority::High);
     let task2 = Task::new(102, "Fix Security Vulnerability", Priority::Critical);
-    let task3 = Task::with_status(103, "Update Documentation", Priority::Low, TaskStatus::Review);
+    let task3 = Task::with_status(
+        103,
+        "Update Documentation",
+        Priority::Low,
+        TaskStatus::Review,
+    );
     let task4 = Task::new(104, "Implement JWT Auth", Priority::Medium);
 
     println!("1. Daftar Task Awal (Display):");

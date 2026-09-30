@@ -9,7 +9,7 @@ use std::mem;
 // ----------------------------------------------------------------------------
 
 /// Newtype untuk identifier unik Pengguna (User).
-/// 
+///
 /// Membungkus tipe primitif `u64` dalam tuple struct 1 elemen.
 /// Memberikan jaminan keamanan tipe kompilasi (compile-time type safety)
 /// tanpa overhead performa runtime (Zero-Cost Abstraction).
@@ -69,7 +69,7 @@ impl From<u64> for OrderId {
 // ----------------------------------------------------------------------------
 
 /// Versi Rentan Bug (Primitive Obsession): Menggunakan `u64` untuk semua parameter ID.
-/// 
+///
 /// ⚠️ RISIKO FATAL:
 /// Jika pemanggil fungsi secara tidak sengaja menukar urutan argumen `order_id` dan `user_id`,
 /// compiler Rust TIDAK AKAN mendeteksi error apapun karena tipe keduanya sama-sama `u64`!
@@ -78,7 +78,7 @@ pub fn process_order_unsafe(user_id: u64, order_id: u64) -> String {
 }
 
 /// Versi Type-Safe (Newtype Pattern): Menggunakan `UserId` dan `OrderId`.
-/// 
+///
 /// 🛡️ PROTEKSI MUTLAK:
 /// Jika urutan argumen tertukar (`process_order_safe(order_id, user_id)`),
 /// compiler Rust LANGSUNG MENOLAK kompilasi dengan error jelas:
@@ -93,10 +93,10 @@ pub fn process_order_safe(user_id: UserId, order_id: OrderId) -> String {
 
 /// Aturan Orphan Rule Rust: Trait hanya boleh diimplementasikan jika Trait ATAU Tipe
 /// didefinisikan di crate lokal kita.
-/// 
+///
 /// Kita DILARANG mengimplementasikan `Display` langsung pada `Vec<String>` karena keduanya
 /// berasal dari `std` (eksternal).
-/// 
+///
 /// Solusi: Bungkus `Vec<String>` ke dalam Newtype tuple struct lokal!
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TagList(pub Vec<String>);
@@ -125,7 +125,7 @@ pub fn run() {
     println!("   a. Versi Rentan (u64):");
     let res_unsafe_ok = process_order_unsafe(user_id.raw(), order_id.raw());
     println!("      * Argumen benar : {res_unsafe_ok}");
-    
+
     // Simulasi human error: parameter tertukar
     let res_unsafe_bug = process_order_unsafe(order_id.raw(), user_id.raw());
     println!("      * Argumen tertukar: {res_unsafe_bug} ❌ (Bug semantik lolos tanpa error!)");
@@ -133,14 +133,27 @@ pub fn run() {
     println!("\n   b. Versi Type-Safe (Newtype):");
     let res_safe = process_order_safe(user_id, order_id);
     println!("      * Eksekusi aman : {res_safe} ✓");
-    println!("      * Jika dibalik `process_order_safe(order_id, user_id)`: Ditolak total oleh compiler!");
+    println!(
+        "      * Jika dibalik `process_order_safe(order_id, user_id)`: Ditolak total oleh compiler!"
+    );
 
     // 2. Evaluasi Ukuran Memori (Zero-Cost Abstraction)
     println!("\n2. Analisis Ukuran Memori (Zero-Cost Abstraction):");
-    println!("   - Ukuran u64 mentah      : {} bytes", mem::size_of::<u64>());
-    println!("   - Ukuran UserId (Newtype): {} bytes", mem::size_of::<UserId>());
-    println!("   - Ukuran OrderId (Newtype): {} bytes", mem::size_of::<OrderId>());
-    println!("   -> Kesimpulan: Newtype memiliki runtime cost = 0! Pembungkus lenyap saat kompilasi.");
+    println!(
+        "   - Ukuran u64 mentah      : {} bytes",
+        mem::size_of::<u64>()
+    );
+    println!(
+        "   - Ukuran UserId (Newtype): {} bytes",
+        mem::size_of::<UserId>()
+    );
+    println!(
+        "   - Ukuran OrderId (Newtype): {} bytes",
+        mem::size_of::<OrderId>()
+    );
+    println!(
+        "   -> Kesimpulan: Newtype memiliki runtime cost = 0! Pembungkus lenyap saat kompilasi."
+    );
 
     // 3. Menembus Orphan Rule via Newtype
     println!("\n3. Bypass Orphan Rule via Newtype (Display untuk Vec<String>):");

@@ -8,7 +8,7 @@ use std::fmt::{Debug, Display};
 // ----------------------------------------------------------------------------
 
 /// Mencari referensi ke elemen dengan nilai terbesar dari sebuah slice generic.
-/// 
+///
 /// Memerlukan trait bound `PartialOrd` agar operator perbandingan `>` valid untuk tipe `T`.
 /// Mengembalikan `Option<&T>`:
 /// - `Some(&T)` jika slice memiliki minimal satu elemen.
@@ -59,7 +59,7 @@ pub fn print_collection<T: Display>(header: &str, items: &[T]) {
 // ----------------------------------------------------------------------------
 
 /// Mentransformasikan vector tipe `T` menjadi vector tipe `U` baru menggunakan fungsi/closure generic.
-/// 
+///
 /// Menggunakan `where clause` untuk keterbacaan trait bounds:
 /// - `F: FnMut(T) -> U` : Closure pemetaan yang menerima nilai kepemilikan `T` dan menghasilkan `U`.
 pub fn transform_collection<T, U, F>(items: Vec<T>, mut transform_fn: F) -> Vec<U>
@@ -74,7 +74,7 @@ where
 }
 
 /// Mengubah elemen slice `&mut [T]` secara langsung di tempat (*in-place mutation*).
-/// 
+///
 /// Tidak mengalokasikan memori baru di heap.
 pub fn transform_collection_mut<T, F>(items: &mut [T], mut transform_fn: F)
 where
@@ -124,7 +124,7 @@ pub fn run() {
 
     // 1. Generic Function: Memilih Nilai Terbesar
     println!("\n1. Memilih Nilai Terbesar (find_largest):");
-    
+
     // a. Integer slice
     let int_list = [42, 108, 17, 99, 5];
     if let Some(max_int) = find_largest(&int_list) {
@@ -132,7 +132,7 @@ pub fn run() {
     }
 
     // b. Float slice
-    let float_list = [3.14, 2.71, 9.81, 1.41];
+    let float_list = [3.15, 2.71, 9.81, 1.41];
     if let Some(max_float) = find_largest(&float_list) {
         println!("   - Float terbesar dari {float_list:?}: {max_float}");
     }
@@ -145,9 +145,18 @@ pub fn run() {
 
     // d. Struct Kustom (PlayerScore)
     let leader_board = [
-        PlayerScore { name: "Alice".to_string(), score: 320 },
-        PlayerScore { name: "Bob".to_string(), score: 550 },
-        PlayerScore { name: "Charlie".to_string(), score: 410 },
+        PlayerScore {
+            name: "Alice".to_string(),
+            score: 320,
+        },
+        PlayerScore {
+            name: "Bob".to_string(),
+            score: 550,
+        },
+        PlayerScore {
+            name: "Charlie".to_string(),
+            score: 410,
+        },
     ];
     if let Some(champion) = find_largest(&leader_board) {
         println!("   - Skor tertinggi (Custom Struct): {champion}");
@@ -161,7 +170,10 @@ pub fn run() {
     // 2. Generic Function: Mencetak Nilai
     println!("\n2. Mencetak Nilai (print_item & print_collection):");
     print_item("   - Single Item (i32)", &1337);
-    print_item("   - Single Item (String)", &"Rust Zero-Cost Abstractions".to_string());
+    print_item(
+        "   - Single Item (String)",
+        &"Rust Zero-Cost Abstractions".to_string(),
+    );
     print_debug_item("   - Debug Item", &vec!["A", "B", "C"]);
 
     let cities = ["Jakarta", "Bandung", "Surabaya", "Yogyakarta"];
@@ -222,9 +234,18 @@ mod tests {
     #[test]
     fn test_find_largest_custom_struct() {
         let players = [
-            PlayerScore { name: "Player1".to_string(), score: 100 },
-            PlayerScore { name: "Player2".to_string(), score: 500 },
-            PlayerScore { name: "Player3".to_string(), score: 250 },
+            PlayerScore {
+                name: "Player1".to_string(),
+                score: 100,
+            },
+            PlayerScore {
+                name: "Player2".to_string(),
+                score: 500,
+            },
+            PlayerScore {
+                name: "Player3".to_string(),
+                score: 250,
+            },
         ];
         let champion = find_largest(&players);
         assert!(champion.is_some());

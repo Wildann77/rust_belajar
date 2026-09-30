@@ -2,7 +2,7 @@
 // Mengorganisasikan kode ke dalam Package, Crate, Modules, dan Visibility Modifiers
 // Rujukan: rust_learning_guide.md (FASE 4) & rust_execution_tasks.md (L413-L459)
 
-use rust_learning_lab::{authenticate, Claims, Priority, Task, TaskService, TaskStatus};
+use rust_learning_lab::{Claims, Priority, Task, TaskService, TaskStatus, authenticate};
 
 pub fn run() {
     println!("============================================================");
@@ -64,7 +64,11 @@ pub fn run() {
 
     // Admin membuat task critical
     let t2_id = task_service
-        .create_task("Mitigasi Zero-day Auth Exploit", Priority::Critical, &admin_claims)
+        .create_task(
+            "Mitigasi Zero-day Auth Exploit",
+            Priority::Critical,
+            &admin_claims,
+        )
         .expect("Admin harus bisa buat critical task");
     println!("   [✓] Task #{} dibuat oleh {}", t2_id, admin_claims.sub);
 
@@ -76,7 +80,10 @@ pub fn run() {
 
     // 5. Demonstrasi Validasi Hak Akses & Enkapsulasi
     println!("\n5. Uji Hak Akses & Role Boundary:");
-    println!("   Skenario A: Developer mencoba memajukan task Critical (#{}):", t2_id);
+    println!(
+        "   Skenario A: Developer mencoba memajukan task Critical (#{}):",
+        t2_id
+    );
     match task_service.advance_task(t2_id, &dev_claims) {
         Ok(_) => println!("     [!] Error: Developer tidak boleh memajukan task Critical!"),
         Err(err) => println!("     [Ditolak Aman] {}", err),
@@ -84,13 +91,22 @@ pub fn run() {
 
     println!("   Skenario B: Admin memajukan task Critical (#{}):", t2_id);
     match task_service.advance_task(t2_id, &admin_claims) {
-        Ok(new_status) => println!("     [Disetujui] Status berhasil dimajukan ke: {:?}", new_status),
+        Ok(new_status) => println!(
+            "     [Disetujui] Status berhasil dimajukan ke: {:?}",
+            new_status
+        ),
         Err(err) => println!("     [!] Gagal: {}", err),
     }
 
-    println!("   Skenario C: Developer memajukan task normal miliknya (#{}):", t1_id);
+    println!(
+        "   Skenario C: Developer memajukan task normal miliknya (#{}):",
+        t1_id
+    );
     match task_service.advance_task(t1_id, &dev_claims) {
-        Ok(new_status) => println!("     [Disetujui] Status berhasil dimajukan ke: {:?}", new_status),
+        Ok(new_status) => println!(
+            "     [Disetujui] Status berhasil dimajukan ke: {:?}",
+            new_status
+        ),
         Err(err) => println!("     [!] Gagal: {}", err),
     }
 
@@ -106,7 +122,10 @@ pub fn run() {
         .filter(|t| t.status == TaskStatus::InProgress)
         .collect();
     println!("\n   Total task aktif: {}", task_service.total_tasks());
-    println!("   Task yang berstatus InProgress: {} buah", in_progress_tasks.len());
+    println!(
+        "   Task yang berstatus InProgress: {} buah",
+        in_progress_tasks.len()
+    );
 
     // 6. Ringkasan Visibility Modifiers
     println!("\n6. Ringkasan Tingkat Akses (Visibility):");

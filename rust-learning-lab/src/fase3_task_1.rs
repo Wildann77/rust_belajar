@@ -46,7 +46,12 @@ impl UserAccount {
     }
 
     // Associated function dengan saldo awal
-    pub fn with_initial_balance(id: u64, username: &str, email: &str, initial_balance: f64) -> Self {
+    pub fn with_initial_balance(
+        id: u64,
+        username: &str,
+        email: &str,
+        initial_balance: f64,
+    ) -> Self {
         Self {
             id,
             username: username.to_string(),
@@ -178,15 +183,28 @@ pub fn run() {
     let black = ColorRgb::black();
     let white = ColorRgb::white();
     println!("5. Tuple Struct:");
-    println!("   Red: RGB({}, {}, {}) -> Hex: {}", red.0, red.1, red.2, red.to_hex());
+    println!(
+        "   Red: RGB({}, {}, {}) -> Hex: {}",
+        red.0,
+        red.1,
+        red.2,
+        red.to_hex()
+    );
     println!("   Black Associated: Hex: {}", black.to_hex());
     println!("   White Associated: Hex: {}", white.to_hex());
 
     let custom_acc = UserAccount::with_initial_balance(103, "grace", "grace@example.com", 500.0);
-    println!("   Custom Initial Balance Account: {}", custom_acc.display_summary());
+    println!(
+        "   Custom Initial Balance Account: {}",
+        custom_acc.display_summary()
+    );
 
     let distance_km = Kilometers(100.0);
-    println!("   Newtype Distance: {:.1} km = {:.2} miles", distance_km.0, distance_km.to_miles());
+    println!(
+        "   Newtype Distance: {:.1} km = {:.2} miles",
+        distance_km.0,
+        distance_km.to_miles()
+    );
 
     // 6. Unit-like Struct (Zero-Sized Type)
     let admin = AdminPrivilege;

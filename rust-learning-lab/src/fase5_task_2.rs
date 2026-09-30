@@ -40,9 +40,7 @@ pub fn process_task(id: u64, name: &str) -> String {
             .build()
             .expect("Gagal menginisialisasi runtime tokio");
 
-        rt.block_on(async {
-            execute_async_task(id, name).await
-        })
+        rt.block_on(async { execute_async_task(id, name).await })
     }
 
     #[cfg(not(feature = "async_runtime"))]
@@ -66,9 +64,15 @@ pub fn run() {
 
     println!("\n3. Konsep Inti Cargo Features:");
     println!("   - Fitur dideklarasikan di Cargo.toml pada blok [features].");
-    println!("   - Dependensi opsional ('optional = true') tidak akan diunduh/dikompilasi jika fitur tidak dipanggil.");
-    println!("   - Menggunakan sintaks 'dep:nama_crate' (Rust 2021/2024 edition) untuk mengaitkan fitur ke dependency.");
-    println!("   - Conditional compilation: #[cfg(feature = \"...\")] atau macro cfg!(feature = \"...\").");
+    println!(
+        "   - Dependensi opsional ('optional = true') tidak akan diunduh/dikompilasi jika fitur tidak dipanggil."
+    );
+    println!(
+        "   - Menggunakan sintaks 'dep:nama_crate' (Rust 2021/2024 edition) untuk mengaitkan fitur ke dependency."
+    );
+    println!(
+        "   - Conditional compilation: #[cfg(feature = \"...\")] atau macro cfg!(feature = \"...\")."
+    );
 }
 
 #[cfg(test)]

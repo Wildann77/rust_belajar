@@ -3,10 +3,10 @@
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Claims {
-    pub sub: String,                   // Public: Subjek/Username
-    pub role: String,                  // Public: Role akun
-    pub(crate) session_id: u64,        // pub(crate): Hanya terlihat di crate ini
-    secret_salt: String,               // Private: Hanya terlihat di file token.rs ini
+    pub sub: String,            // Public: Subjek/Username
+    pub role: String,           // Public: Role akun
+    pub(crate) session_id: u64, // pub(crate): Hanya terlihat di crate ini
+    secret_salt: String,        // Private: Hanya terlihat di file token.rs ini
 }
 
 impl Claims {

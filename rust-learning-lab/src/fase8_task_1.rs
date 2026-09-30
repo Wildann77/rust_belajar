@@ -8,22 +8,18 @@ use std::fmt::{self, Debug, Display, Formatter};
 // ----------------------------------------------------------------------------
 
 /// Menemukan string slice terpanjang di antara dua input.
-/// 
+///
 /// Mengapa butuh lifetime generic parameter `'a`?
 /// Rust borrow checker saat kompilasi tidak tahu cabang mana (`if` atau `else`)
 /// yang akan dieksekusi saat runtime. Anotasi `'a` memberitahu compiler bahwa
 /// referensi kembalian valid selama irisan masa hidup (intersection/overlap)
 /// terpendek antara `x` dan `y`.
 pub fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
-    if x.len() >= y.len() {
-        x
-    } else {
-        y
-    }
+    if x.len() >= y.len() { x } else { y }
 }
 
 /// Eksperimen: Mengembalikan referensi pertama (`a`).
-/// 
+///
 /// Meskipun parameter `b` juga dianotasi dengan `'a`, nilai kembalian hanya berasal dari `a`.
 pub fn first<'a>(a: &'a str, _b: &'a str) -> &'a str {
     a
@@ -34,7 +30,7 @@ pub fn first<'a>(a: &'a str, _b: &'a str) -> &'a str {
 // ----------------------------------------------------------------------------
 
 /// Fungsi dengan dua parameter lifetime independen: `'a` dan `'b`.
-/// 
+///
 /// Jika hanya menggunakan satu lifetime `'a` untuk `primary` dan `context`,
 /// maka masa hidup nilai kembalian akan dibatasi oleh masa hidup `context` yang lebih pendek!
 /// Dengan memisahkan `'a` dan `'b`, `context` boleh memiliki scope lokal yang sangat sempit
@@ -49,7 +45,7 @@ pub fn choose_first_with_context<'a, 'b>(primary: &'a str, context: &'b str) -> 
 // ----------------------------------------------------------------------------
 
 /// Struct yang memegang referensi sebagai field (`&'a str`).
-/// 
+///
 /// ATURAN EMAS:
 /// Instance dari struct `Parser<'a>` TIDAK BOLEH hidup lebih lama daripada
 /// data string yang direferensikan oleh field `source`.
@@ -112,7 +108,7 @@ impl<'a> Parser<'a> {
 // ----------------------------------------------------------------------------
 
 /// Aturan 1 & 2: Satu input reference otomatis mengisi seluruh output reference.
-/// 
+///
 /// Versi Elided (implisit tanpa anotasi):
 pub fn first_word(s: &str) -> &str {
     let bytes = s.as_bytes();
@@ -143,7 +139,7 @@ pub fn first_word_explicit<'a>(s: &'a str) -> &'a str {
 pub const GLOBAL_SYSTEM_NAME: &'static str = "RUST_LEARNING_SYSTEM_V2";
 
 /// Verifikasi trait bound `T: 'static`.
-/// 
+///
 /// Artinya: Tipe `T` TIDAK mengandung referensi non-static (hanya tipe owned
 /// seperti `String`, `i32`, atau referensi `&'static`).
 pub fn verify_static_bound<T: Display + 'static>(val: T) -> String {
@@ -180,11 +176,7 @@ pub fn find_first_match<'a, T: PartialEq>(items: &'a [T], target: &T) -> Option<
 /// Menggabungkan generic lifetime `'a` dengan generic type `T` bertrait bound `Display`.
 pub fn longest_with_announcement<'a, T: Display>(x: &'a str, y: &'a str, ann: T) -> &'a str {
     let _log = format!("Pengumuman: {ann}");
-    if x.len() >= y.len() {
-        x
-    } else {
-        y
-    }
+    if x.len() >= y.len() { x } else { y }
 }
 
 // ----------------------------------------------------------------------------
@@ -222,14 +214,14 @@ impl<'a> Highlightable<'a> for Excerpt<'a> {
 // ----------------------------------------------------------------------------
 
 /// Penjelasan Simulasi Dangling Reference (Kenapa Ditolak Compiler):
-/// 
+///
 /// ```rust
 /// // ❌ CONTOH ERROR 1: Mengembalikan referensi data lokal yang segera di-drop
 /// fn create_dangling_reference() -> &str {
 ///     let s = String::from("halo lokal");
 ///     &s // ERROR: returns a value referencing data owned by the current function
 /// }      // `s` di-drop di sini! Referensi yang dikembalikan akan menunjuk memori sampah.
-/// 
+///
 /// // ❌ CONTOH ERROR 2: Struct menyimpan referensi ke variabel lokal scope sempit
 /// fn struct_dangling_scenario() {
 ///     let parser: Parser;
@@ -240,7 +232,7 @@ impl<'a> Highlightable<'a> for Excerpt<'a> {
 ///     println!("{:?}", parser.source); // `parser` hidup lebih lama dari data yang dipinjamnya.
 /// }
 /// ```
-/// 
+///
 /// SOLUSI BEBAS `.clone()`:
 /// 1. Transfer kepemilikan utuh (return owned `String` alih-alih `&str`).
 /// 2. Pastikan owner data hidup di scope luar (caller scope), bukan di dalam local scope.
@@ -267,8 +259,14 @@ pub fn run() {
     let string2 = "Modern 2024";
     let result_longest = longest(&string1, string2);
     let result_first = first(&string1, string2);
-    println!("   - String 1        : \"{string1}\" (len: {})", string1.len());
-    println!("   - String 2        : \"{string2}\" (len: {})", string2.len());
+    println!(
+        "   - String 1        : \"{string1}\" (len: {})",
+        string1.len()
+    );
+    println!(
+        "   - String 2        : \"{string2}\" (len: {})",
+        string2.len()
+    );
     println!("   - Hasil longest() : \"{result_longest}\"");
     println!("   - Hasil first()   : \"{result_first}\"");
 
@@ -282,7 +280,9 @@ pub fn run() {
         println!("   - Konteks aktif di inner scope: \"{short_lived_context}\"");
     }
     // selected_doc tetap valid meskipun short_lived_context sudah di-drop!
-    println!("   - Hasil di outer scope: \"{selected_doc}\" ✓ (Bebas dari batasan masa hidup konteks)");
+    println!(
+        "   - Hasil di outer scope: \"{selected_doc}\" ✓ (Bebas dari batasan masa hidup konteks)"
+    );
 
     // 3. Lifetime pada Struct & Impl (Parser<'a>)
     println!("\n3. Lifetime pada Struct dan Impl (Parser<'a>):");
@@ -294,7 +294,10 @@ pub fn run() {
     println!("   - Token 3 (Proto)  : {:?}", parser.next_token().unwrap());
     println!("   - Token 4 (Habis)  : {:?}", parser.next_token());
     println!("   - Peek sisa string : {:?}", parser.peek());
-    println!("   - Method announce  : \"{}\"", parser.announce_and_get_excerpt("Parsing Header OK"));
+    println!(
+        "   - Method announce  : \"{}\"",
+        parser.announce_and_get_excerpt("Parsing Header OK")
+    );
 
     // 4. Lifetime Elision Demonstration
     println!("\n4. Pembuktian Tiga Aturan Lifetime Elision:");
@@ -329,7 +332,9 @@ pub fn run() {
     let ann_res = longest_with_announcement("Alpha", "BetaGamma", 2026);
     println!("   - longest_with_announcement: \"{ann_res}\"");
 
-    let excerpt = Excerpt { part: "Rust guarantees memory safety without garbage collection" };
+    let excerpt = Excerpt {
+        part: "Rust guarantees memory safety without garbage collection",
+    };
     println!("   - Trait Highlightable: \"{}\"", excerpt.get_highlight());
 
     let mut query_parser = Parser::new("SELECT name FROM users");
@@ -343,7 +348,9 @@ pub fn run() {
     println!("   [x] Fungsi 'a: Menandai hubungan validitas antar referensi bagi borrow checker.");
     println!("   [x] Non-extending: Lifetime tidak memperpanjang umur memori objek yang dipinjam.");
     println!("   [x] Lifetime Elision: 3 aturan deterministik yang mengotomatisasi anotasi.");
-    println!("   [x] Struct Reference: Struct Parser<'a> dan Excerpt<'a> valid selama sumber referensi hidup.");
+    println!(
+        "   [x] Struct Reference: Struct Parser<'a> dan Excerpt<'a> valid selama sumber referensi hidup."
+    );
 }
 
 // ----------------------------------------------------------------------------

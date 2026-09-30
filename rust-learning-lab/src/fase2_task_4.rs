@@ -56,9 +56,9 @@ pub fn run() {
     println!("   String asal: \"{sentence}\"");
 
     // Slicing string berdasarkan range byte
-    let word1: &str = &sentence[0..4];   // "Rust"
-    let word2: &str = &sentence[5..16];  // "Pemrograman"
-    let word3: &str = &sentence[17..];   // "Sistem"
+    let word1: &str = &sentence[0..4]; // "Rust"
+    let word2: &str = &sentence[5..16]; // "Pemrograman"
+    let word3: &str = &sentence[17..]; // "Sistem"
     println!("   Slice [0..4]  : \"{word1}\"");
     println!("   Slice [5..16] : \"{word2}\"");
     println!("   Slice [17..]  : \"{word3}\"");

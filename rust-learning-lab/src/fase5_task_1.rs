@@ -68,7 +68,10 @@ pub fn run() {
     pkg.add_dep("serde_json", "1.0", DependencyKind::Normal);
     pkg.add_dep("pretty_assertions", "1.4", DependencyKind::Dev);
 
-    println!("   Package: {} v{} (Edition {})", pkg.name, pkg.version, pkg.edition);
+    println!(
+        "   Package: {} v{} (Edition {})",
+        pkg.name, pkg.version, pkg.edition
+    );
     println!("   Jumlah dependensi terdaftar: {}", pkg.dependencies.len());
 
     // 2. Serialisasi Rust struct -> JSON string (memanfaatkan crates `serde` & `serde_json`)
@@ -79,15 +82,24 @@ pub fn run() {
     // 3. Deserialisasi JSON string -> Rust struct
     println!("\n3. Deserialisasi kembali dari JSON ke struct Rust:");
     let parsed_pkg = PackageMeta::from_json(&json_output).expect("Gagal deserialisasi dari JSON");
-    println!("   Verifikasi kesamaan data (parsed == original): {}", parsed_pkg == pkg);
+    println!(
+        "   Verifikasi kesamaan data (parsed == original): {}",
+        parsed_pkg == pkg
+    );
     println!("   Nama package hasil parse: {}", parsed_pkg.name);
 
     // 4. Penjelasan cargo tree & Cargo.lock
     println!("\n4. Mekanisme Dependency Resolution di Cargo:");
     println!("   - [dependencies]: Dikompilasi dan dimasukkan ke dalam binary rilis produksi.");
-    println!("   - [dev-dependencies]: Hanya dikompilasi saat `cargo test` atau `cargo bench` (zero overhead di produksi).");
-    println!("   - `Cargo.lock`: Mengunci versi spesifik (exact pin) dan checksum SHA-256 untuk builds deterministik.");
-    println!("   - `cargo tree`: Memvisualisasikan hierarki pohon dependensi langsung dan transitif.");
+    println!(
+        "   - [dev-dependencies]: Hanya dikompilasi saat `cargo test` atau `cargo bench` (zero overhead di produksi)."
+    );
+    println!(
+        "   - `Cargo.lock`: Mengunci versi spesifik (exact pin) dan checksum SHA-256 untuk builds deterministik."
+    );
+    println!(
+        "   - `cargo tree`: Memvisualisasikan hierarki pohon dependensi langsung dan transitif."
+    );
 }
 
 #[cfg(test)]

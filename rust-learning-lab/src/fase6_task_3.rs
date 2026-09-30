@@ -93,7 +93,10 @@ pub fn run() {
 
     // Persiapan file dummy sementara
     let temp_conf = std::env::temp_dir().join("app_fase6_test.conf");
-    let _ = fs::write(&temp_conf, "database_url=postgres://localhost:5432/app\nport=8080\n");
+    let _ = fs::write(
+        &temp_conf,
+        "database_url=postgres://localhost:5432/app\nport=8080\n",
+    );
 
     // 1. Sukses: Semua langkah valid
     println!("1. Kasus Sukses (Valid Input, Valid I/O, Key Ditemukan):");
@@ -173,10 +176,7 @@ mod tests {
         let app_err = AppError::Io(io_err);
 
         assert!(app_err.source().is_some());
-        assert_eq!(
-            app_err.source().unwrap().to_string(),
-            "access denied"
-        );
+        assert_eq!(app_err.source().unwrap().to_string(), "access denied");
 
         let not_found_err = AppError::NotFound("Item".to_string());
         assert!(not_found_err.source().is_none());

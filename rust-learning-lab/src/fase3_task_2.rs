@@ -94,7 +94,11 @@ impl TaskEvent {
                 content,
                 is_internal,
             } => {
-                let badge = if *is_internal { "[Internal]" } else { "[Public]" };
+                let badge = if *is_internal {
+                    "[Internal]"
+                } else {
+                    "[Public]"
+                };
                 format!("Event: Komentar baru dari {author} {badge}: \"{content}\"")
             }
             TaskEvent::Rescheduled {
@@ -128,10 +132,18 @@ pub fn run() {
     let mut current = todo;
     println!("2. Transisi Status Siklus Task:");
     while let Some(next_status) = current.next() {
-        println!("   {} -> transisi ke: {}", current.label(), next_status.label());
+        println!(
+            "   {} -> transisi ke: {}",
+            current.label(),
+            next_status.label()
+        );
         current = next_status;
     }
-    println!("   Final state: {} (next: {:?})", current.label(), current.next());
+    println!(
+        "   Final state: {} (next: {:?})",
+        current.label(),
+        current.next()
+    );
 
     // 3. Enum Membawa Data: Tuple-like & Struct-like
     let events = vec![
@@ -160,8 +172,14 @@ pub fn run() {
     let status_size = std::mem::size_of::<Status>();
     let event_size = std::mem::size_of::<TaskEvent>();
     println!("4. Memory Footprint (Tagged Union):");
-    println!("   size_of::<Status>    : {} byte (hanya butuh 1 byte tag/discriminant)", status_size);
-    println!("   size_of::<TaskEvent> : {} bytes (tag + payload variant terbesar)", event_size);
+    println!(
+        "   size_of::<Status>    : {} byte (hanya butuh 1 byte tag/discriminant)",
+        status_size
+    );
+    println!(
+        "   size_of::<TaskEvent> : {} bytes (tag + payload variant terbesar)",
+        event_size
+    );
 }
 
 // ==========================================

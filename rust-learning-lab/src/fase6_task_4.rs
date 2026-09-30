@@ -83,50 +83,75 @@ pub fn count_log_events(events: &[&str]) -> HashMap<String, usize> {
 
 pub fn run() {
     println!("=== Fase 6 - Task 4: Collections — Vec<T> & HashMap Entry API ===");
-    println!("Konsep Inti: Alokasi efisien with_capacity, safe access get, retain in-place, & Entry API\n");
+    println!(
+        "Konsep Inti: Alokasi efisien with_capacity, safe access get, retain in-place, & Entry API\n"
+    );
 
     // 1. Vec::with_capacity & push
     println!("1. Demonstrasi Vec::with_capacity & push:");
     let mut inventory = init_inventory_with_capacity(5);
-    println!("   - Initial State: len = {}, capacity = {}", inventory.len(), inventory.capacity());
+    println!(
+        "   - Initial State: len = {}, capacity = {}",
+        inventory.len(),
+        inventory.capacity()
+    );
 
-    add_product(&mut inventory, Product {
-        id: 1,
-        name: "Mechanical Keyboard".to_string(),
-        category: "Electronics".to_string(),
-        stock: 15,
-        price: 120.0,
-    });
-    add_product(&mut inventory, Product {
-        id: 2,
-        name: "Gaming Mouse".to_string(),
-        category: "Electronics".to_string(),
-        stock: 0, // Habis
-        price: 60.0,
-    });
-    add_product(&mut inventory, Product {
-        id: 3,
-        name: "Ergonomic Chair".to_string(),
-        category: "Furniture".to_string(),
-        stock: 5,
-        price: 350.0,
-    });
-    add_product(&mut inventory, Product {
-        id: 4,
-        name: "Desk Lamp".to_string(),
-        category: "Furniture".to_string(),
-        stock: 0, // Habis
-        price: 45.0,
-    });
-    add_product(&mut inventory, Product {
-        id: 5,
-        name: "USB-C Hub".to_string(),
-        category: "Electronics".to_string(),
-        stock: 25,
-        price: 35.0,
-    });
+    add_product(
+        &mut inventory,
+        Product {
+            id: 1,
+            name: "Mechanical Keyboard".to_string(),
+            category: "Electronics".to_string(),
+            stock: 15,
+            price: 120.0,
+        },
+    );
+    add_product(
+        &mut inventory,
+        Product {
+            id: 2,
+            name: "Gaming Mouse".to_string(),
+            category: "Electronics".to_string(),
+            stock: 0, // Habis
+            price: 60.0,
+        },
+    );
+    add_product(
+        &mut inventory,
+        Product {
+            id: 3,
+            name: "Ergonomic Chair".to_string(),
+            category: "Furniture".to_string(),
+            stock: 5,
+            price: 350.0,
+        },
+    );
+    add_product(
+        &mut inventory,
+        Product {
+            id: 4,
+            name: "Desk Lamp".to_string(),
+            category: "Furniture".to_string(),
+            stock: 0, // Habis
+            price: 45.0,
+        },
+    );
+    add_product(
+        &mut inventory,
+        Product {
+            id: 5,
+            name: "USB-C Hub".to_string(),
+            category: "Electronics".to_string(),
+            stock: 25,
+            price: 35.0,
+        },
+    );
 
-    println!("   - After 5 Push : len = {}, capacity = {}", inventory.len(), inventory.capacity());
+    println!(
+        "   - After 5 Push : len = {}, capacity = {}",
+        inventory.len(),
+        inventory.capacity()
+    );
 
     // 2. Safe access via .get()
     println!("\n2. Akses Aman Index via .get():");
@@ -174,13 +199,16 @@ mod tests {
         assert_eq!(vec.len(), 0);
         assert!(vec.capacity() >= 10);
 
-        add_product(&mut vec, Product {
-            id: 1,
-            name: "Mouse".to_string(),
-            category: "Electronics".to_string(),
-            stock: 10,
-            price: 50.0,
-        });
+        add_product(
+            &mut vec,
+            Product {
+                id: 1,
+                name: "Mouse".to_string(),
+                category: "Electronics".to_string(),
+                stock: 10,
+                price: 50.0,
+            },
+        );
 
         assert_eq!(vec.len(), 1);
         assert_eq!(vec[0].name, "Mouse");
@@ -189,13 +217,16 @@ mod tests {
     #[test]
     fn test_vec_safe_get() {
         let mut vec = Vec::new();
-        add_product(&mut vec, Product {
-            id: 10,
-            name: "Monitor".to_string(),
-            category: "Electronics".to_string(),
-            stock: 2,
-            price: 200.0,
-        });
+        add_product(
+            &mut vec,
+            Product {
+                id: 10,
+                name: "Monitor".to_string(),
+                category: "Electronics".to_string(),
+                stock: 2,
+                price: 200.0,
+            },
+        );
 
         assert!(get_product_safely(&vec, 0).is_some());
         assert_eq!(get_product_safely(&vec, 0).unwrap().id, 10);
@@ -208,9 +239,27 @@ mod tests {
     #[test]
     fn test_vec_retain_in_place() {
         let mut vec = vec![
-            Product { id: 1, name: "A".to_string(), category: "C1".to_string(), stock: 5, price: 10.0 },
-            Product { id: 2, name: "B".to_string(), category: "C1".to_string(), stock: 0, price: 10.0 },
-            Product { id: 3, name: "C".to_string(), category: "C2".to_string(), stock: 12, price: 10.0 },
+            Product {
+                id: 1,
+                name: "A".to_string(),
+                category: "C1".to_string(),
+                stock: 5,
+                price: 10.0,
+            },
+            Product {
+                id: 2,
+                name: "B".to_string(),
+                category: "C1".to_string(),
+                stock: 0,
+                price: 10.0,
+            },
+            Product {
+                id: 3,
+                name: "C".to_string(),
+                category: "C2".to_string(),
+                stock: 12,
+                price: 10.0,
+            },
         ];
 
         filter_in_stock_only(&mut vec);
@@ -223,9 +272,27 @@ mod tests {
     #[test]
     fn test_hashmap_entry_api_aggregation() {
         let inventory = vec![
-            Product { id: 1, name: "KB".to_string(), category: "Tech".to_string(), stock: 10, price: 100.0 },
-            Product { id: 2, name: "Mouse".to_string(), category: "Tech".to_string(), stock: 20, price: 50.0 },
-            Product { id: 3, name: "Table".to_string(), category: "Furniture".to_string(), stock: 5, price: 200.0 },
+            Product {
+                id: 1,
+                name: "KB".to_string(),
+                category: "Tech".to_string(),
+                stock: 10,
+                price: 100.0,
+            },
+            Product {
+                id: 2,
+                name: "Mouse".to_string(),
+                category: "Tech".to_string(),
+                stock: 20,
+                price: 50.0,
+            },
+            Product {
+                id: 3,
+                name: "Table".to_string(),
+                category: "Furniture".to_string(),
+                stock: 5,
+                price: 200.0,
+            },
         ];
 
         let agg = calculate_stock_by_category(&inventory);
